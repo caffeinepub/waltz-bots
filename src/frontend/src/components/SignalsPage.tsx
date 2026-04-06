@@ -430,7 +430,7 @@ export function SignalsPage({
       if (
         result &&
         result.direction === signal.direction &&
-        result.confidence >= 65
+        result.confidence >= 80
       ) {
         // Signal passed — lock it as tested and show VERIFIED confirmation
         setTestedIds((prev) => new Set([...prev, signal.id]));
@@ -488,7 +488,7 @@ export function SignalsPage({
     if (droppedIds.has(s.id)) return false;
     if (filter === "BUY") return s.direction === "BUY";
     if (filter === "SELL") return s.direction === "SELL";
-    if (filter === "Hot") return s.confidence >= 70;
+    if (filter === "Hot") return s.confidence >= 90;
     return true;
   });
 

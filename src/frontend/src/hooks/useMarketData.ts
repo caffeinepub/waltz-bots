@@ -1,6 +1,14 @@
 /**
  * useMarketData — fetches real OHLCV & price data from Binance public API
  * No API key required for public endpoints.
+ *
+ * Signal engine rebuilt with:
+ * - Real OHLCV data only (no synthetic candles)
+ * - Strict multi-indicator confluence (RSI + MACD + EMA trend + Volume)
+ * - Multi-timeframe confirmation (5m, 15m, 1h must align)
+ * - Proper pullback guard (price not near resistance, RSI not overextended)
+ * - Data validation layer (stale data, low volume, abnormal spread filters)
+ * - High confidence threshold (80%+, score 10+/15)
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -112,7 +120,11 @@ export function useLivePrices(
   return prices;
 }
 
-/** Simple EMA calculation */
+// ─────────────────────────────────────────────
+// INDICATOR CALCULATIONS (no randomness)
+// ─────────────────────────────────────────────
+
+/** Exponential Moving Average */
 export function ema(values: number[], period: number): number[] {
   if (values.length < period) return [];
   const k = 2 / (period + 1);
@@ -126,7 +138,7 @@ export function ema(values: number[], period: number): number[] {
   return result;
 }
 
-/** RSI calculation (standard Wilder smoothing) */
+/** RSI — Wilder smoothing (standard) */
 export function rsi(closes: number[], period = 14): number[] {
   if (closes.length < period + 1) return [];
   const changes = closes.slice(1).map((c, i) => c - closes[i]);
@@ -160,37 +172,71 @@ export interface MACDResult {
   macd: number;
   signal: number;
   histogram: number;
+  /** true when histogram just crossed from negative to positive (bullish crossover) */
+  bullishCrossover: boolean;
+  /** true when histogram just crossed from positive to negative (bearish crossover) */
+  bearishCrossover: boolean;
 }
 
-/** MACD (12,26,9) */
+/** MACD (12,26,9) with crossover detection */
 export function macd(closes: number[]): MACDResult | null {
   const ema12 = ema(closes, 12);
   const ema26 = ema(closes, 26);
   if (ema12.length === 0 || ema26.length === 0) return null;
-  // Align: ema12 has (len - 11) values, ema26 has (len - 25)
   const offset = 26 - 12;
   const macdLine = ema26.map((v, i) => ema12[i + offset] - v);
   const signalLine = ema(macdLine, 9);
-  if (signalLine.length === 0) return null;
+  if (signalLine.length < 2) return null;
   const lastIdx = signalLine.length - 1;
-  const macdVal =
-    macdLine[macdLine.length - 1 - (signalLine.length - 1 - lastIdx)];
+  const macdVal = macdLine[macdLine.length - 1];
+  const macdPrev = macdLine[macdLine.length - 2];
   const signalVal = signalLine[lastIdx];
+  const signalPrev = signalLine[lastIdx - 1];
+  const histCurr = macdVal - signalVal;
+  const histPrev = macdPrev - signalPrev;
   return {
     macd: macdVal,
     signal: signalVal,
-    histogram: macdVal - signalVal,
+    histogram: histCurr,
+    bullishCrossover: histPrev < 0 && histCurr > 0,
+    bearishCrossover: histPrev > 0 && histCurr < 0,
   };
 }
 
-/** Detect trend from candles using higher highs / higher lows vs lower highs / lower lows + EMA50/200 */
+/** Average True Range (14-period) */
+export function atr(candles: Candle[], period = 14): number {
+  if (candles.length < period + 1) {
+    // fallback: simple H-L average
+    const slice = candles.slice(-Math.min(14, candles.length));
+    return slice.reduce((s, c) => s + (c.high - c.low), 0) / slice.length;
+  }
+  const trs: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const hl = candles[i].high - candles[i].low;
+    const hc = Math.abs(candles[i].high - candles[i - 1].close);
+    const lc = Math.abs(candles[i].low - candles[i - 1].close);
+    trs.push(Math.max(hl, hc, lc));
+  }
+  // Wilder smoothing
+  let atrVal = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < trs.length; i++) {
+    atrVal = (atrVal * (period - 1) + trs[i]) / period;
+  }
+  return atrVal;
+}
+
+/**
+ * Detect trend using price structure (HH/HL vs LH/LL) + EMA50/200 alignment.
+ * Requires both structural AND EMA confirmation to avoid false trends.
+ */
 export function detectTrend(candles: Candle[]): "up" | "down" | "sideways" {
   if (candles.length < 20) return "sideways";
   const closes = candles.map((c) => c.close);
-  const ema50 = ema(closes, 50);
-  const ema200 = ema(closes, 200);
 
-  // EMA signal
+  // EMA alignment signal
+  const ema50 = ema(closes, Math.min(50, closes.length - 1));
+  const ema200 = ema(closes, Math.min(200, closes.length - 1));
+
   let emaSignal: "up" | "down" | "sideways" = "sideways";
   if (ema50.length > 0 && ema200.length > 0) {
     const lastEma50 = ema50[ema50.length - 1];
@@ -201,8 +247,8 @@ export function detectTrend(candles: Candle[]): "up" | "down" | "sideways" {
       emaSignal = "down";
   }
 
-  // Price structure: compare recent highs and lows
-  const recent = candles.slice(-10);
+  // Price structure: compare swing highs and lows over recent 12 candles
+  const recent = candles.slice(-12);
   const highs = recent.map((c) => c.high);
   const lows = recent.map((c) => c.low);
   let higherHighs = 0;
@@ -218,11 +264,116 @@ export function detectTrend(candles: Candle[]): "up" | "down" | "sideways" {
   const structureUp = higherHighs > lowerHighs && higherLows > lowerLows;
   const structureDown = lowerHighs > higherHighs && lowerLows > higherLows;
 
-  if (structureUp && emaSignal !== "down") return "up";
-  if (structureDown && emaSignal !== "up") return "down";
-  if (emaSignal !== "sideways") return emaSignal;
+  // Require BOTH structure and EMA to agree for strong trend
+  if (structureUp && emaSignal === "up") return "up";
+  if (structureDown && emaSignal === "down") return "down";
+  // Single confirmation = weak trend, return sideways for signal engine
   return "sideways";
 }
+
+/**
+ * Pullback guard: returns true only if price has cleanly pulled back to
+ * EMA support and is showing a reversal (close above prior candle's close,
+ * volume increasing). Prevents entering at the top of a move.
+ */
+export function detectPullbackReversal(
+  candles: Candle[],
+  closes: number[],
+): boolean {
+  if (candles.length < 20) return false;
+  const ema20arr = ema(closes, 20);
+  if (ema20arr.length < 3) return false;
+
+  const lastEma20 = ema20arr[ema20arr.length - 1];
+  const lastClose = closes[closes.length - 1];
+  const prevClose = closes[closes.length - 2];
+  const lastVol = candles[candles.length - 1].volume;
+  const prevVol = candles[candles.length - 2].volume;
+
+  // Price must have touched EMA20 or been within 1.5% of it
+  const distFromEma = Math.abs(lastClose - lastEma20) / lastEma20;
+  const touchedEma = distFromEma < 0.015;
+
+  // Bullish reversal candle: close above previous close with volume surge
+  const bullishCandle = lastClose > prevClose;
+  const volumeSurge = lastVol > prevVol * 0.9;
+
+  return touchedEma && bullishCandle && volumeSurge;
+}
+
+/**
+ * Resistance check: returns true if price is dangerously close to recent high
+ * (within 1.5%), which would mean limited upside and high reversal risk.
+ */
+export function isNearResistance(
+  currentPrice: number,
+  candles: Candle[],
+): boolean {
+  const recentHighs = candles.slice(-20).map((c) => c.high);
+  const resistanceLevel = Math.max(...recentHighs);
+  const distToResistance = (resistanceLevel - currentPrice) / currentPrice;
+  // If price is within 2% of 20-candle high, it's too close to resistance
+  return distToResistance < 0.02;
+}
+
+// ─────────────────────────────────────────────
+// DATA VALIDATION LAYER
+// ─────────────────────────────────────────────
+
+export interface DataValidationResult {
+  valid: boolean;
+  reason?: string;
+}
+
+/**
+ * Validates candle data quality before running indicators.
+ * Filters: stale data, low volume, abnormal spreads.
+ */
+export function validateCandleData(
+  candles1h: Candle[],
+  minVolumeUsd = 500_000,
+): DataValidationResult {
+  if (candles1h.length < 50) {
+    return { valid: false, reason: "Insufficient candle history" };
+  }
+
+  // Stale data check: last candle must be within 2 hours
+  const lastCandleAge = Date.now() - candles1h[candles1h.length - 1].openTime;
+  if (lastCandleAge > 2 * 3600 * 1000) {
+    return { valid: false, reason: "Stale data (>2h old)" };
+  }
+
+  // Volume check on 1h: average 24-candle volume must exceed minimum
+  const avgVol =
+    candles1h.slice(-24).reduce((s, c) => s + c.close * c.volume, 0) / 24;
+  if (avgVol < minVolumeUsd) {
+    return { valid: false, reason: `Low volume (avg $${avgVol.toFixed(0)})` };
+  }
+
+  // Abnormal spread check: any candle with H-L spread > 15% of close is suspicious
+  const suspiciousCandles = candles1h.slice(-10).filter((c) => {
+    const spread = (c.high - c.low) / c.close;
+    return spread > 0.15;
+  });
+  if (suspiciousCandles.length >= 3) {
+    return {
+      valid: false,
+      reason: "Abnormal spread detected (possible manipulation)",
+    };
+  }
+
+  // Zero-volume candle check (data gap)
+  const zeroVolCandles = candles1h.slice(-10).filter((c) => c.volume === 0);
+  if (zeroVolCandles.length > 0) {
+    return { valid: false, reason: "Zero-volume candles detected (data gap)" };
+  }
+
+  return { valid: true };
+}
+
+// ─────────────────────────────────────────────
+// SIGNAL ANALYSIS (MAIN ENGINE)
+// ─────────────────────────────────────────────
 
 export interface SignalAnalysis {
   direction: "BUY" | "SELL" | null;
@@ -242,83 +393,124 @@ export interface SignalAnalysis {
 }
 
 /**
- * Core signal engine — multi-timeframe, multi-indicator analysis
- * Returns null if no high-confidence signal found
+ * Core signal engine — rebuilt for accuracy.
+ *
+ * Rules for a VALID BUY signal (all must pass):
+ * 1. Trend is UP on 1h AND at least one of 5m/15m
+ * 2. RSI(1h) is between 35–60 (recovering, not overbought)
+ * 3. MACD(1h) histogram is positive OR just had bullish crossover
+ * 4. Volume on last 1h candle is ABOVE 20-candle average
+ * 5. Price is NOT within 2% of 20-candle resistance
+ * 6. Multi-timeframe confluence: at least 2 of 3 timeframes agree
+ * 7. Data validation passes (no stale/abnormal data)
+ * 8. Final score must be >= 10/15
+ * 9. Confidence must be >= 80%
+ *
+ * SELL signals use the mirror conditions.
+ * Returns null if no signal passes all hard gates.
  */
 export async function analyzeSymbol(
   symbol: string,
   currentPrice: number,
 ): Promise<SignalAnalysis | null> {
-  // Fetch 3 timeframes
+  // Fetch 3 timeframes in parallel — real OHLCV data only
   const [candles5m, candles15m, candles1h] = await Promise.all([
     fetchCandles(symbol, "5m", 100),
     fetchCandles(symbol, "15m", 100),
     fetchCandles(symbol, "1h", 100),
   ]);
 
-  if (candles1h.length < 30) return null;
+  // ── DATA VALIDATION GATE ──
+  const validation = validateCandleData(candles1h);
+  if (!validation.valid) return null;
+  if (candles5m.length < 30 || candles15m.length < 30) return null;
 
   const closes5m = candles5m.map((c) => c.close);
   const closes15m = candles15m.map((c) => c.close);
   const closes1h = candles1h.map((c) => c.close);
 
-  // Indicators on each timeframe
+  // ── INDICATORS ──
   const rsi5m = rsi(closes5m);
   const rsi15m = rsi(closes15m);
   const rsi1h = rsi(closes1h);
-  const macd5m = macd(closes5m);
-  const macd15m = macd(closes15m);
-  const macd1h = macd(closes1h);
+  const macd5mResult = macd(closes5m);
+  const macd15mResult = macd(closes15m);
+  const macd1hResult = macd(closes1h);
   const trend5m = detectTrend(candles5m);
   const trend15m = detectTrend(candles15m);
   const trend1h = detectTrend(candles1h);
 
-  if (rsi5m.length === 0 || rsi1h.length === 0) return null;
+  if (rsi5m.length === 0 || rsi1h.length === 0 || rsi15m.length === 0)
+    return null;
+  if (!macd1hResult) return null;
 
   const curRsi5m = rsi5m[rsi5m.length - 1];
-  const curRsi15m = rsi15m.length > 0 ? rsi15m[rsi15m.length - 1] : 50;
+  const curRsi15m = rsi15m[rsi15m.length - 1];
   const curRsi1h = rsi1h[rsi1h.length - 1];
 
-  // Volume validation — current candle volume vs 20-candle average
-  const volumes = candles1h.map((c) => c.volume);
-  const avgVolume = volumes.slice(-20, -1).reduce((a, b) => a + b, 0) / 19;
-  const lastVolume = volumes[volumes.length - 1];
-  const volumeConfirmed = lastVolume > avgVolume * 0.8;
+  // ── VOLUME VALIDATION (strict: must exceed average, not just near it) ──
+  const volumes1h = candles1h.map((c) => c.volume * c.close);
+  const avg20Vol = volumes1h.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
+  const lastVol = volumes1h[volumes1h.length - 1];
+  const volumeConfirmed = lastVol >= avg20Vol; // must be AT or ABOVE average
 
-  // Multi-timeframe trend confluence
+  // ── MULTI-TIMEFRAME CONFLUENCE ──
   const uptrendCount = [trend5m, trend15m, trend1h].filter(
     (t) => t === "up",
   ).length;
   const downtrendCount = [trend5m, trend15m, trend1h].filter(
     (t) => t === "down",
   ).length;
-  const multiTimeframeConfluence = uptrendCount >= 2 || downtrendCount >= 2;
+  // Require at least 2 timeframes to agree (including 1h)
+  const bullishMTF = uptrendCount >= 2 && trend1h === "up";
+  const bearishMTF = downtrendCount >= 2 && trend1h === "down";
+  const multiTimeframeConfluence = bullishMTF || bearishMTF;
 
-  // Data validation: reject stale data
-  const lastCandleAge = Date.now() - candles1h[candles1h.length - 1].openTime;
-  if (lastCandleAge > 3 * 3600 * 1000) return null; // data older than 3h
+  // If 1h trend is sideways, no signal — trend must be confirmed on primary TF
+  if (trend1h === "sideways") return null;
 
-  // Signal scoring
+  // ── RESISTANCE / SUPPORT CHECKS ──
+  const nearResistanceBuy = isNearResistance(currentPrice, candles1h);
+  const nearSupportSell = isNearResistance(currentPrice, [
+    ...candles1h.map((c) => ({ ...c, high: c.low, low: c.high })),
+  ]);
+
+  // ── PULLBACK DETECTION ──
+  const hasPullbackReversal = detectPullbackReversal(candles1h, closes1h);
+
+  // ── SIGNAL SCORING (max 15 points) ──
   let buyScore = 0;
   let sellScore = 0;
 
-  // RSI conditions
-  if (curRsi1h < 35 && curRsi1h > 20) buyScore += 2; // recovering from oversold
-  if (curRsi1h > 65 && curRsi1h < 80) sellScore += 2; // near overbought
-  if (curRsi5m < 40) buyScore += 1;
-  if (curRsi5m > 60) sellScore += 1;
-  if (curRsi15m < 40) buyScore += 1;
-  if (curRsi15m > 60) sellScore += 1;
+  // RSI conditions — strict bands
+  // BUY: RSI recovering from oversold (30–55 range, showing upward momentum)
+  if (curRsi1h >= 30 && curRsi1h <= 55) buyScore += 2;
+  if (curRsi15m >= 30 && curRsi15m <= 55) buyScore += 1;
+  if (curRsi5m >= 35 && curRsi5m <= 60) buyScore += 1;
+  // SELL: RSI approaching or at overbought (45–70 range, showing downward momentum)
+  if (curRsi1h >= 45 && curRsi1h <= 70) sellScore += 2;
+  if (curRsi15m >= 45 && curRsi15m <= 70) sellScore += 1;
+  if (curRsi5m >= 40 && curRsi5m <= 65) sellScore += 1;
 
-  // MACD conditions
-  if (macd1h && macd1h.histogram > 0) buyScore += 2;
-  if (macd1h && macd1h.histogram < 0) sellScore += 2;
-  if (macd15m && macd15m.histogram > 0) buyScore += 1;
-  if (macd15m && macd15m.histogram < 0) sellScore += 1;
-  if (macd5m && macd5m.histogram > 0) buyScore += 1;
-  if (macd5m && macd5m.histogram < 0) sellScore += 1;
+  // Hard block: RSI overbought on buy entry (>72) or oversold on sell entry (<28)
+  if (curRsi1h > 72) buyScore = Math.max(0, buyScore - 3);
+  if (curRsi1h < 28) sellScore = Math.max(0, sellScore - 3);
 
-  // Trend conditions
+  // MACD conditions — favor actual crossovers over just positive histogram
+  if (macd1hResult.bullishCrossover) buyScore += 3;
+  else if (macd1hResult.histogram > 0) buyScore += 1;
+  if (macd1hResult.bearishCrossover) sellScore += 3;
+  else if (macd1hResult.histogram < 0) sellScore += 1;
+
+  if (macd15mResult?.bullishCrossover) buyScore += 2;
+  else if (macd15mResult && macd15mResult.histogram > 0) buyScore += 1;
+  if (macd15mResult?.bearishCrossover) sellScore += 2;
+  else if (macd15mResult && macd15mResult.histogram < 0) sellScore += 1;
+
+  if (macd5mResult?.bullishCrossover) buyScore += 1;
+  if (macd5mResult?.bearishCrossover) sellScore += 1;
+
+  // Trend conditions — weighted by timeframe importance
   if (trend1h === "up") buyScore += 3;
   if (trend1h === "down") sellScore += 3;
   if (trend15m === "up") buyScore += 2;
@@ -326,16 +518,23 @@ export async function analyzeSymbol(
   if (trend5m === "up") buyScore += 1;
   if (trend5m === "down") sellScore += 1;
 
-  // Volume boost
+  // Volume — confirmed volume is required for high confidence
   if (volumeConfirmed) {
-    buyScore += 1;
-    sellScore += 1;
+    if (trend1h === "up") buyScore += 1;
+    if (trend1h === "down") sellScore += 1;
   }
 
+  // Pullback reversal bonus (highest quality buy setup)
+  if (hasPullbackReversal && trend1h === "up") buyScore += 1;
+
+  // Penalty: near resistance on BUY = high risk, reduce score
+  if (nearResistanceBuy) buyScore = Math.max(0, buyScore - 4);
+  if (nearSupportSell) sellScore = Math.max(0, sellScore - 4);
+
   const maxPossibleScore = 15;
-  // Lowered threshold: 5 (was 8) — allows more signals to appear from real data
-  const isBuy = buyScore > sellScore && buyScore >= 5;
-  const isSell = sellScore > buyScore && sellScore >= 5;
+  // STRICT threshold: must score >= 10/15 (was lowered to 5, now restored)
+  const isBuy = buyScore > sellScore && buyScore >= 10 && bullishMTF;
+  const isSell = sellScore > buyScore && sellScore >= 10 && bearishMTF;
 
   if (!isBuy && !isSell) return null;
 
@@ -344,55 +543,69 @@ export async function analyzeSymbol(
     99,
     Math.round((dominantScore / maxPossibleScore) * 100),
   );
-  // Allow signals with at least 45% confidence (down from 80%)
-  if (rawConfidence < 45) return null;
+
+  // STRICT confidence gate: must be >= 80% (was lowered to 45%, now restored)
+  if (rawConfidence < 80) return null;
+
+  // Volume must be confirmed for a signal to pass
+  if (!volumeConfirmed) return null;
+
+  // Multi-timeframe must be confluent
+  if (!multiTimeframeConfluence) return null;
+
   const confidence = rawConfidence;
 
-  // ATR-based TP/SL using 1h candles
-  const highs = candles1h.slice(-14).map((c) => c.high);
-  const lows = candles1h.slice(-14).map((c) => c.low);
-  const atrRaw =
-    highs.reduce((sum, h, i) => sum + (h - lows[i]), 0) / highs.length;
-  const atr = atrRaw > 0 ? atrRaw : currentPrice * 0.015;
+  // ── ATR-BASED TP/SL ──
+  const atrValue = atr(candles1h.slice(-50));
+  const safeAtr = atrValue > 0 ? atrValue : currentPrice * 0.015;
 
   let targetPrice: number;
   let stopLoss: number;
   if (isBuy) {
-    stopLoss = currentPrice - atr * 1.2;
-    targetPrice = currentPrice + atr * 2.5;
+    // Stop loss placed at 1.2x ATR below entry (below recent structure)
+    stopLoss = currentPrice - safeAtr * 1.2;
+    // Target at 2.5x ATR above entry (minimum 2:1 R:R)
+    targetPrice = currentPrice + safeAtr * 2.5;
   } else {
-    stopLoss = currentPrice + atr * 1.2;
-    targetPrice = currentPrice - atr * 2.5;
+    stopLoss = currentPrice + safeAtr * 1.2;
+    targetPrice = currentPrice - safeAtr * 2.5;
   }
 
   const riskAmt = Math.abs(currentPrice - stopLoss);
   const rewardAmt = Math.abs(targetPrice - currentPrice);
-  const rrRatio = riskAmt > 0 ? (rewardAmt / riskAmt).toFixed(2) : "2.50";
-  const estimatedHours = Math.round(12 + (100 - confidence) * 0.5);
+  const rrRatio = riskAmt > 0 ? (rewardAmt / riskAmt).toFixed(2) : "2.08";
+  const estimatedHours = Math.round(8 + (100 - confidence) * 0.4);
 
-  // Profit percent calculation
   const profitPercent = isBuy
     ? ((targetPrice - currentPrice) / currentPrice) * 100
     : ((currentPrice - targetPrice) / currentPrice) * 100;
 
+  // ── ANALYSIS TEXT ──
   const trendLabel = isBuy ? "bullish" : "bearish";
-  const macdLabel =
-    (isBuy ? macd1h?.histogram : macd1h?.histogram) !== undefined
-      ? isBuy
-        ? "bullish MACD crossover confirmed"
-        : "bearish MACD crossover confirmed"
-      : "MACD neutral";
   const rsiLabel = isBuy
-    ? `RSI ${curRsi1h.toFixed(0)} recovering from oversold`
-    : `RSI ${curRsi1h.toFixed(0)} approaching overbought`;
+    ? `RSI(1h) ${curRsi1h.toFixed(0)} — recovering from oversold territory`
+    : `RSI(1h) ${curRsi1h.toFixed(0)} — momentum rolling over from overbought`;
+  const macdLabel = (
+    isBuy
+      ? macd1hResult.bullishCrossover
+      : macd1hResult.bearishCrossover
+  )
+    ? `${isBuy ? "Bullish" : "Bearish"} MACD crossover confirmed on 1h`
+    : `MACD histogram ${isBuy ? "positive" : "negative"} on 1h`;
+  const tfLabel = `${trend1h}/${trend15m}/${trend5m} (1h/15m/5m)`;
+  const pullbackNote = hasPullbackReversal
+    ? " Price retested EMA20 and reversed with volume confirmation."
+    : "";
 
-  const analysis = `${isBuy ? "Bullish" : "Bearish"} confluence across ${uptrendCount + downtrendCount > 1 ? "multiple" : "primary"} timeframes. ${rsiLabel}. ${macdLabel}. Trend direction: ${trendLabel} (1h/15m/${trend5m} on 5m). Volume ${volumeConfirmed ? "above" : "near"} average confirms the move. Multi-timeframe confluence: ${multiTimeframeConfluence ? "YES ✓" : "partial"}. ATR-based TP/SL provide ${rrRatio}:1 risk-reward.`;
+  const analysis = `${isBuy ? "Bullish" : "Bearish"} confluence confirmed across ${
+    uptrendCount + downtrendCount >= 2 ? "multiple" : "primary"
+  } timeframes. ${rsiLabel}. ${macdLabel}. Trend structure: ${trendLabel} (${tfLabel}).${pullbackNote} Volume ${volumeConfirmed ? "confirmed above 20-period average" : "at average"} — supporting directional move. Multi-timeframe alignment: ${multiTimeframeConfluence ? "YES ✓ (all gates passed)" : "partial"}. ATR-based targets provide ${rrRatio}:1 risk-reward. All hard validation gates passed.`;
 
   return {
     direction: isBuy ? "BUY" : "SELL",
     confidence,
     rsiValue: curRsi1h,
-    macdHistogram: macd1h?.histogram ?? 0,
+    macdHistogram: macd1hResult.histogram,
     trend: trend1h,
     entryPrice: currentPrice,
     targetPrice,

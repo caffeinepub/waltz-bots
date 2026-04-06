@@ -2,7 +2,11 @@
  * SignalScanContext — persistent signal scan that survives page navigation.
  * The scan runs ONCE when the provider mounts.
  * Rescans only happen when rescan() is called manually.
- * Symbols that previously hit stop loss are blacklisted and excluded from future scans.
+ *
+ * Data quality gates applied BEFORE analyzeSymbol:
+ * - Symbols blacklisted for SL hits are skipped
+ * - Low 24h volume assets are skipped (< $1M USD)
+ * - Price must be available and valid
  */
 import {
   createContext,
@@ -40,7 +44,7 @@ export interface LiveSignal {
   profitPercent: number;
 }
 
-// 90+ BingX spot trading pairs
+// Scan list — established, high-liquidity pairs with real Binance OHLCV data
 export const SCAN_SYMBOLS = [
   "BTC",
   "ETH",
@@ -237,6 +241,9 @@ export const COIN_NAMES: Record<string, string> = {
   DOGE: "Dogecoin",
 };
 
+/** Minimum 24h USD volume to allow a symbol into the signal engine */
+const MIN_24H_VOLUME_USD = 1_000_000;
+
 interface SignalScanContextType {
   signals: LiveSignal[];
   loading: boolean;
@@ -280,6 +287,7 @@ export function SignalScanProvider({
     setScannedCount(0);
 
     try {
+      // Fetch all 24h tickers in one batch call — real data, no synthetic prices
       const tickers = await fetch24hTickers(SCAN_SYMBOLS);
       if (tickers.length === 0) {
         setLoading(false);
@@ -288,29 +296,42 @@ export function SignalScanProvider({
         return;
       }
 
-      const priceMap = Object.fromEntries(
-        tickers.map((t) => [t.symbol, t.price]),
-      );
+      // Build price + volume maps for pre-filtering
+      const priceMap: Record<string, number> = {};
+      const volumeMap: Record<string, number> = {};
+      for (const t of tickers) {
+        priceMap[t.symbol] = t.price;
+        volumeMap[t.symbol] = t.volume24h;
+      }
 
-      // Load SL blacklist — symbols that previously hit stop loss are excluded
+      // Load SL blacklist — symbols that previously hit stop loss are excluded permanently
       const slHits: string[] = JSON.parse(
         localStorage.getItem("wb_sl_hits") ?? "[]",
       );
 
       for (const symbol of SCAN_SYMBOLS) {
-        // Skip symbols blacklisted due to previous SL hits
+        // Skip SL-blacklisted symbols
         if (slHits.includes(symbol)) {
           setScannedCount((prev) => prev + 1);
           continue;
         }
 
         const price = priceMap[symbol];
-        if (!price) {
+        if (!price || price <= 0) {
           setScannedCount((prev) => prev + 1);
-          await new Promise((r) => setTimeout(r, 80));
           continue;
         }
+
+        // Pre-filter: skip low-volume assets before running OHLCV analysis
+        const vol24h = volumeMap[symbol] ?? 0;
+        if (vol24h < MIN_24H_VOLUME_USD) {
+          setScannedCount((prev) => prev + 1);
+          continue;
+        }
+
         try {
+          // analyzeSymbol fetches real OHLCV from Binance and runs strict
+          // multi-indicator, multi-timeframe analysis with confidence >= 80%
           const analysis: SignalAnalysis | null = await analyzeSymbol(
             symbol,
             price,
@@ -344,9 +365,10 @@ export function SignalScanProvider({
             );
           }
         } catch {
-          // Skip failed symbols silently
+          // Skip failed symbols silently — data errors do not crash the scan
         }
         setScannedCount((prev) => prev + 1);
+        // Small delay between requests to avoid rate-limiting
         await new Promise((r) => setTimeout(r, 120));
       }
 
