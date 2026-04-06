@@ -61,7 +61,10 @@ interface UpdateResultData {
   details: string;
 }
 
-/** Compute AI verdict from live data vs signal targets */
+/**
+ * Compute AI verdict using LIVE PRICE ONLY (no stale indicator values from signal generation).
+ * This gives accurate real-time assessment of trade health.
+ */
 function computeVerdict(
   signal: LiveSignal,
   livePrice: number,
@@ -71,43 +74,50 @@ function computeVerdict(
     ? (livePrice - signal.entryPrice) / (signal.targetPrice - signal.entryPrice)
     : (signal.entryPrice - livePrice) /
       (signal.entryPrice - signal.targetPrice);
+  const progressPct = Math.max(0, progress * 100);
 
-  const rsi = signal.rsiValue;
-  const macdPositive = signal.macdHistogram > 0;
-  const trending = signal.trend === (isBuy ? "up" : "down");
+  // Distance to SL and TP as % of total range
+  const totalRange = Math.abs(signal.targetPrice - signal.stopLoss);
+  const distToSL = isBuy
+    ? ((livePrice - signal.stopLoss) / totalRange) * 100
+    : ((signal.stopLoss - livePrice) / totalRange) * 100;
 
-  let bullishFactors = 0;
-  let bearishFactors = 0;
-
-  if (isBuy) {
-    if (livePrice > signal.entryPrice) bullishFactors++;
-    if (rsi < 70 && rsi > 30) bullishFactors++;
-    if (macdPositive) bullishFactors++;
-    if (trending) bullishFactors++;
-    if (livePrice < signal.stopLoss * 1.01) bearishFactors += 3;
-    if (signal.multiTimeframeConfluence) bullishFactors++;
-  } else {
-    if (livePrice < signal.entryPrice) bullishFactors++;
-    if (rsi > 30 && rsi < 70) bullishFactors++;
-    if (!macdPositive) bullishFactors++;
-    if (trending) bullishFactors++;
-    if (livePrice > signal.stopLoss * 0.99) bearishFactors += 3;
-    if (signal.multiTimeframeConfluence) bullishFactors++;
-  }
+  // Is price dangerously close to SL? (< 15% of range remaining to SL)
+  const nearSL = distToSL < 15;
+  // Is price already past the midpoint toward TP?
+  const pastMidpoint = progressPct >= 50;
+  // Has price moved adversely from entry? (> 5% wrong direction)
+  const adverseMove = isBuy
+    ? livePrice < signal.entryPrice * 0.95
+    : livePrice > signal.entryPrice * 1.05;
 
   let verdict: TrackedTrade["aiVerdict"];
   let suggestion: string;
 
-  if (bearishFactors >= 3) {
+  if (nearSL || adverseMove) {
     verdict = "UNLIKELY";
-    suggestion = `Price is approaching the stop loss zone at $${signal.stopLoss.toLocaleString(undefined, { maximumFractionDigits: 4 })}. RSI: ${rsi.toFixed(1)}, Trend: ${signal.trend}. Consider reviewing position. This assessment is based on live Binance data.`;
-  } else if (bullishFactors >= 4) {
+    const exitPrice = livePrice.toLocaleString(undefined, {
+      maximumFractionDigits: 4,
+    });
+    const slPrice = signal.stopLoss.toLocaleString(undefined, {
+      maximumFractionDigits: 4,
+    });
+    suggestion = `⚠️ EXIT RECOMMENDATION: Price at $${exitPrice} is dangerously close to stop loss ($${slPrice}). Distance to SL: ${distToSL.toFixed(1)}% of range. Consider exiting now at $${exitPrice} to preserve capital. Market conditions have shifted adversely since signal generation.`;
+  } else if (pastMidpoint) {
     verdict = "LIKELY";
-    const pct = Math.max(0, progress * 100);
-    suggestion = `Strong ${isBuy ? "bullish" : "bearish"} conditions persist. Progress to TP: ${pct.toFixed(1)}%. RSI: ${rsi.toFixed(1)}, MACD: ${macdPositive ? "bullish" : "bearish"}, Trend: ${signal.trend}. Multi-TF confluence: ${signal.multiTimeframeConfluence ? "YES" : "partial"}. High probability of hitting $${signal.targetPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}.`;
+    const tpPrice = signal.targetPrice.toLocaleString(undefined, {
+      maximumFractionDigits: 4,
+    });
+    suggestion = `✅ ON TRACK: Price has moved ${progressPct.toFixed(1)}% toward TP target ($${tpPrice}). Trade is performing well. Consider taking partial profit at TP1/TP2 levels while leaving remainder to run to full TP3 target.`;
+  } else if (progressPct >= 20) {
+    verdict = "LIKELY";
+    const tpPrice = signal.targetPrice.toLocaleString(undefined, {
+      maximumFractionDigits: 4,
+    });
+    suggestion = `✅ PROGRESSING: ${progressPct.toFixed(1)}% progress to TP3 ($${tpPrice}). Price is moving in the expected direction. Continue holding. ATR-based target is realistic given current volatility.`;
   } else {
     verdict = "UNCERTAIN";
-    suggestion = `Mixed signals: RSI ${rsi.toFixed(1)}, MACD ${macdPositive ? "positive" : "negative"}, trend ${signal.trend}. Trade is valid but monitor closely. Progress: ${Math.max(0, progress * 100).toFixed(1)}% toward TP. Live Binance data is being tracked.`;
+    suggestion = `⏳ EARLY STAGE: ${progressPct.toFixed(1)}% progress toward TP. Price is consolidating near entry. This is normal — ATR-based targets require time for volatility to carry price. Hold position as long as price stays above SL ($${signal.stopLoss.toLocaleString(undefined, { maximumFractionDigits: 4 })}).`;
   }
 
   return { verdict, suggestion };
@@ -809,27 +819,55 @@ export function TrackingPage() {
   const handleUpdate = async (trade: TrackedTrade, livePrice: number) => {
     setUpdatingId(trade.id);
     try {
+      // Fetch FRESH candle analysis — not stale signal data
       const result = await analyzeSymbol(trade.symbol, livePrice);
+      const isBuy = trade.direction === "BUY";
+      const progress = isBuy
+        ? ((livePrice - trade.entryPrice) /
+            (trade.targetPrice - trade.entryPrice)) *
+          100
+        : ((trade.entryPrice - livePrice) /
+            (trade.entryPrice - trade.targetPrice)) *
+          100;
+      const progressPct = Math.max(0, progress);
+      const tp1 =
+        trade.tp1 ??
+        (isBuy
+          ? trade.entryPrice + (trade.targetPrice - trade.entryPrice) * 0.4
+          : trade.entryPrice - (trade.entryPrice - trade.targetPrice) * 0.4);
+      const tp1Hit = isBuy ? livePrice >= tp1 : livePrice <= tp1;
+
       if (
         result &&
         result.direction === trade.direction &&
-        result.confidence >= 55
+        result.confidence >= 75
       ) {
         setUpdateResults((prev) => ({
           ...prev,
           [trade.id]: {
             passed: true,
-            details:
-              "✅ CONFIRMED: Trade is still on track to hit TP. No adverse signals detected. Conditions remain aligned with original signal.",
+            details: `✅ STILL VALID: Fresh 4h+1h+15m analysis confirms ${trade.direction} setup. Confidence: ${result.confidence}%. Progress to TP: ${progressPct.toFixed(1)}%. ATR: $${result.atrValue.toFixed(4)}. RR: ${result.riskReward}. ${result.breakOfStructure ? "Break of Structure still active. " : ""}${tp1Hit ? "TP1 already hit — consider securing partial profits." : `TP1 at $${tp1.toFixed(4)} is next milestone.`} Hold position.`,
           },
         }));
-      } else {
+      } else if (result && result.direction !== trade.direction) {
+        // Signal reversed direction — strong exit signal
         setUpdateResults((prev) => ({
           ...prev,
           [trade.id]: {
             passed: false,
-            details:
-              "⚠️ ALERT: Market conditions have shifted. Re-evaluate entry and consider tightening stop loss.",
+            details: `🔄 DIRECTION FLIP: Fresh analysis now shows ${result.direction} signal — OPPOSITE to your open ${trade.direction} trade. EXIT NOW at $${livePrice.toLocaleString(undefined, { maximumFractionDigits: 4 })} to avoid stop loss. Market structure has shifted significantly.`,
+          },
+        }));
+      } else {
+        // No clear signal — conditions degraded
+        const distToSL = Math.abs(livePrice - trade.stopLoss);
+        const distToTP = Math.abs(trade.targetPrice - livePrice);
+        const ratio = distToSL > 0 ? (distToTP / distToSL).toFixed(1) : "N/A";
+        setUpdateResults((prev) => ({
+          ...prev,
+          [trade.id]: {
+            passed: false,
+            details: `⚠️ CONDITIONS WEAKENED: Market structure no longer clearly ${trade.direction === "BUY" ? "bullish" : "bearish"}. Progress: ${progressPct.toFixed(1)}%. Remaining RR ratio: 1:${ratio}. Current price: $${livePrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}. ${progressPct > 30 ? "Consider taking partial profit now before conditions deteriorate further." : "Consider exiting to avoid stop loss hit."}`,
           },
         }));
       }
@@ -838,7 +876,8 @@ export function TrackingPage() {
         ...prev,
         [trade.id]: {
           passed: false,
-          details: "⚠️ Could not complete update. Check network and try again.",
+          details:
+            "⚠️ Could not fetch fresh market data. Check network and try again.",
         },
       }));
     } finally {
