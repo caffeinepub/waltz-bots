@@ -1,0 +1,303 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:wght@700;800;900&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+
+    /* Navy / dark surface */
+    --navy: 23.5 45% 14%; /* #0B1F3B */
+    --navy-deep: 22 52% 16%; /* #0A254A */
+
+    /* Off-white backgrounds */
+    --background: 220 60% 97%; /* #F6F8FC */
+    --background-alt: 218 50% 95.5%; /* #F3F6FB */
+    --foreground: 220 30% 8%; /* #0F172A */
+
+    /* Card surfaces */
+    --card: 1 0 0;
+    --card-foreground: 0.145 0 0;
+    --popover: 1 0 0;
+    --popover-foreground: 0.145 0 0;
+
+    /* Gold accent */
+    --gold: 0.74 0.15 80;
+    --gold-light: 0.87 0.13 88;
+    --gold-dark: 0.58 0.13 76;
+
+    /* Blue accent */
+    --accent-blue: 0.59 0.19 255;
+
+    /* Success green */
+    --success: 0.55 0.17 145;
+    --danger: 0.55 0.22 25;
+
+    /* Muted */
+    --muted: 0.97 0 0;
+    --muted-foreground: 0.45 0.03 255;
+
+    /* Borders */
+    --border: 0.91 0.02 240;
+    --input: 0.91 0.02 240;
+    --ring: 0.74 0.15 80;
+
+    /* Semantic tokens */
+    --primary: 0.18 0.04 250;
+    --primary-foreground: 0.98 0 0;
+    --secondary: 0.96 0.01 240;
+    --secondary-foreground: 0.18 0.04 250;
+    --accent: 0.97 0 0;
+    --accent-foreground: 0.18 0 0;
+    --destructive: 0.55 0.22 25;
+    --destructive-foreground: 0.98 0 0;
+
+    --chart-1: 0.646 0.222 41.116;
+    --chart-2: 0.6 0.118 184.704;
+    --chart-3: 0.398 0.07 227.392;
+    --chart-4: 0.828 0.189 84.429;
+    --chart-5: 0.769 0.188 70.08;
+
+    --sidebar: 0.985 0 0;
+    --sidebar-foreground: 0.145 0 0;
+    --sidebar-primary: 0.18 0.04 250;
+    --sidebar-primary-foreground: 0.985 0 0;
+    --sidebar-accent: 0.97 0 0;
+    --sidebar-accent-foreground: 0.18 0 0;
+    --sidebar-border: 0.922 0 0;
+    --sidebar-ring: 0.74 0.15 80;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    background: linear-gradient(135deg, #f6f8fc 0%, #eff4fb 50%, #f3f6fb 100%);
+    color: #0f172a;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    min-height: 100vh;
+  }
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 20px;
+  box-shadow: 0 8px 32px rgba(11, 31, 59, 0.1), 0 1px 0 rgba(255, 255, 255, 0.8)
+    inset;
+}
+
+.glass-card-dark {
+  background: rgba(10, 25, 50, 0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(212, 175, 55, 0.18);
+  border-radius: 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Gold skeuo button */
+.btn-gold {
+  background: linear-gradient(135deg, #f2d27a 0%, #d4af37 50%, #b8960c 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), 0 4px 14px
+    rgba(212, 175, 55, 0.45), 0 1px 3px rgba(0, 0, 0, 0.15);
+  border-radius: 999px;
+  font-weight: 700;
+  color: #3d2800;
+  transition: all 0.2s ease;
+}
+
+.btn-gold:hover {
+  background: linear-gradient(135deg, #f8df8a 0%, #e8c040 50%, #c4a020 100%);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.6), 0 6px 20px
+    rgba(212, 175, 55, 0.55), 0 2px 6px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+
+/* BUY/SELL signal badges */
+.badge-buy {
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  color: white;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.4);
+}
+
+.badge-sell {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: white;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.4);
+}
+
+/* Price pulse animation */
+@keyframes price-up {
+  0% {
+    color: #22c55e;
+  }
+  100% {
+    color: inherit;
+  }
+}
+
+@keyframes price-down {
+  0% {
+    color: #ef4444;
+  }
+  100% {
+    color: inherit;
+  }
+}
+
+.price-flash-up {
+  animation: price-up 0.8s ease-out;
+}
+
+.price-flash-down {
+  animation: price-down 0.8s ease-out;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.4);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.7);
+}
+
+/* Live dot pulse */
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.4);
+  }
+}
+
+.live-dot {
+  animation: live-pulse 1.4s infinite;
+}
+
+/* Float animation for 3D scene fallback */
+@keyframes float-1 {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-18px) rotate(5deg);
+  }
+}
+@keyframes float-2 {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(-4deg);
+  }
+}
+@keyframes float-3 {
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-22px) rotate(8deg);
+  }
+}
+
+.float-coin-1 {
+  animation: float-1 4s ease-in-out infinite;
+}
+.float-coin-2 {
+  animation: float-2 5.5s ease-in-out infinite;
+}
+.float-coin-3 {
+  animation: float-3 3.8s ease-in-out infinite;
+}
+
+/* Ticker tape */
+@keyframes ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.ticker-tape {
+  animation: ticker 28s linear infinite;
+}
+
+/* Stacked carousel */
+.stacked-card {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  transform-origin: top center;
+  will-change: transform, opacity;
+}
+
+/* Glow effect */
+.glow-gold {
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.35), 0 0 40px
+    rgba(212, 175, 55, 0.15);
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px rgba(47, 111, 237, 0.3);
+}
+
+/* Nav pill */
+.nav-pill {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(230, 234, 242, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 4px 24px rgba(11, 31, 59, 0.08), 0 1px 0
+    rgba(255, 255, 255, 0.9) inset;
+}
+
+/* Stat counter card */
+.stat-card {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(11, 31, 59, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(11, 31, 59, 0.14);
+}
