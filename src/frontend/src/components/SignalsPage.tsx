@@ -23,19 +23,18 @@ import {
   RefreshCw,
   Shield,
   Target,
-  Timer,
   TrendingDown,
   TrendingUp,
-  Zap,
+  X,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 function confidenceColor(c: number) {
-  if (c >= 90) return "#D4AF37";
-  if (c >= 80) return "#22C55E";
-  if (c >= 75) return "#EAB308";
+  if (c >= 85) return "#D4AF37";
+  if (c >= 70) return "#22C55E";
+  if (c >= 55) return "#EAB308";
   return "#94A3B8";
 }
 
@@ -108,25 +107,6 @@ function SignalCard({
       100;
   const clampedProgress = Math.max(0, Math.min(100, progress));
 
-  // Partial TP progress markers
-  const tp1Pct = isBuy
-    ? ((signal.tp1 - signal.entryPrice) /
-        (signal.targetPrice - signal.entryPrice)) *
-      100
-    : ((signal.entryPrice - signal.tp1) /
-        (signal.entryPrice - signal.targetPrice)) *
-      100;
-  const tp2Pct = isBuy
-    ? ((signal.tp2 - signal.entryPrice) /
-        (signal.targetPrice - signal.entryPrice)) *
-      100
-    : ((signal.entryPrice - signal.tp2) /
-        (signal.entryPrice - signal.targetPrice)) *
-      100;
-
-  const tp1Hit = isBuy ? livePrice >= signal.tp1 : livePrice <= signal.tp1;
-  const tp2Hit = isBuy ? livePrice >= signal.tp2 : livePrice <= signal.tp2;
-
   return (
     <div
       className="h-full w-full text-left rounded-2xl p-5"
@@ -180,8 +160,8 @@ function SignalCard({
           </div>
         </div>
 
-        {/* Entry type + profit badge */}
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
+        {/* Profit % badge */}
+        <div className="flex items-center gap-2 mb-2">
           <span
             className="text-xs px-2 py-0.5 rounded-full font-bold"
             style={{
@@ -192,43 +172,9 @@ function SignalCard({
           >
             💰 Profit: +{signal.profitPercent.toFixed(2)}%
           </span>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full"
-            style={{
-              background: "rgba(99,102,241,0.12)",
-              color: "#818CF8",
-              border: "1px solid rgba(99,102,241,0.2)",
-            }}
-          >
-            📌 {signal.entryType}
-          </span>
-          {signal.breakOfStructure && (
-            <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={{
-                background: "rgba(234,179,8,0.12)",
-                color: "#EAB308",
-                border: "1px solid rgba(234,179,8,0.2)",
-              }}
-            >
-              ⚡ BoS
-            </span>
-          )}
-          {signal.volumeSpike && (
-            <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={{
-                background: "rgba(34,197,94,0.1)",
-                color: "#4ADE80",
-                border: "1px solid rgba(34,197,94,0.2)",
-              }}
-            >
-              📈 Vol Spike
-            </span>
-          )}
         </div>
 
-        {/* TP confirmation banner */}
+        {/* Permanent TP confirmation banner */}
         <div
           className="w-full flex items-center gap-2 px-3 py-2 rounded-xl mb-3"
           style={{
@@ -240,9 +186,6 @@ function SignalCard({
           <Shield className="w-3 h-3 text-green-400 flex-shrink-0" />
           <span className="text-green-400 text-xs font-bold tracking-wide">
             CONFIRMED — WILL HIT TAKE PROFIT
-          </span>
-          <span className="text-white/30 text-xs ml-auto">
-            RR {signal.riskReward}
           </span>
         </div>
 
@@ -264,7 +207,7 @@ function SignalCard({
             className="rounded-xl p-2"
             style={{ background: "rgba(34,197,94,0.1)" }}
           >
-            <p className="text-green-400/70 mb-0.5">Target (TP3)</p>
+            <p className="text-green-400/70 mb-0.5">Target</p>
             <p className="text-green-400 font-bold">
               $
               {signal.targetPrice.toLocaleString(undefined, {
@@ -286,81 +229,71 @@ function SignalCard({
           </div>
         </div>
 
-        {/* Partial TP levels */}
-        <div className="grid grid-cols-2 gap-2 text-xs mb-3">
-          <div
-            className="rounded-xl p-2"
-            style={{
-              background: tp1Hit
-                ? "rgba(34,197,94,0.2)"
-                : "rgba(255,255,255,0.04)",
-              border: tp1Hit
-                ? "1px solid rgba(34,197,94,0.5)"
-                : "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <p className="text-white/40 mb-0.5">TP1 {tp1Hit ? "✅" : ""}</p>
-            <p
-              className={`font-bold ${tp1Hit ? "text-green-400" : "text-white/60"}`}
-            >
-              $
-              {signal.tp1.toLocaleString(undefined, {
-                maximumFractionDigits: 4,
-              })}
-            </p>
-          </div>
-          <div
-            className="rounded-xl p-2"
-            style={{
-              background: tp2Hit
-                ? "rgba(34,197,94,0.2)"
-                : "rgba(255,255,255,0.04)",
-              border: tp2Hit
-                ? "1px solid rgba(34,197,94,0.5)"
-                : "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <p className="text-white/40 mb-0.5">TP2 {tp2Hit ? "✅" : ""}</p>
-            <p
-              className={`font-bold ${tp2Hit ? "text-green-400" : "text-white/60"}`}
-            >
-              $
-              {signal.tp2.toLocaleString(undefined, {
-                maximumFractionDigits: 4,
-              })}
-            </p>
-          </div>
-        </div>
-
         {/* Confidence bar */}
         <div className="mb-3">
           <ConfidenceBar value={signal.confidence} />
         </div>
 
         {/* Meta row */}
-        <div className="flex items-center justify-between text-xs text-white/40 mb-3">
+        <div className="flex items-center justify-between text-xs text-white/40 mb-2">
           <div className="flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            <span>~{signal.estimatedHours}h to TP3</span>
+            <span>~{signal.estimatedHours}h to TP</span>
           </div>
           <div className="flex items-center gap-1">
             <TrendIcon trend={signal.trend} />
-            <span>RR {signal.riskReward}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Zap className="w-3 h-3" />
-            <span>ATR ${signal.atrValue.toFixed(4)}</span>
+            <span>R:R {signal.riskReward}</span>
           </div>
         </div>
 
-        {/* Progress bar with partial TP markers */}
+        {/* Entry type + confirmation badges */}
+        <div className="flex flex-wrap gap-1 mb-3">
+          {signal.entryType && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(212,175,55,0.12)",
+                color: "#D4AF37",
+                border: "1px solid rgba(212,175,55,0.25)",
+              }}
+            >
+              {signal.entryType}
+            </span>
+          )}
+          {signal.bosConfirmed && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(34,197,94,0.12)",
+                color: "#22C55E",
+                border: "1px solid rgba(34,197,94,0.25)",
+              }}
+            >
+              BoS ✓
+            </span>
+          )}
+          {signal.volumeSpike && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(59,130,246,0.12)",
+                color: "#60A5FA",
+                border: "1px solid rgba(59,130,246,0.25)",
+              }}
+            >
+              Vol Spike ✓
+            </span>
+          )}
+        </div>
+
+        {/* Progress bar */}
         <div className="mb-3">
           <div className="flex justify-between text-xs text-white/30 mb-1">
-            <span>Progress to TP3</span>
+            <span>Progress to TP</span>
             <span>{clampedProgress.toFixed(1)}%</span>
           </div>
           <div
-            className="h-2 rounded-full relative"
+            className="h-1.5 rounded-full"
             style={{ background: "rgba(255,255,255,0.08)" }}
           >
             <div
@@ -372,28 +305,6 @@ function SignalCard({
                   : "linear-gradient(90deg, #DC2626, #EF4444)",
               }}
             />
-            {/* TP1 marker */}
-            <div
-              className="absolute top-0 w-0.5 h-full rounded-full"
-              style={{
-                left: `${Math.min(tp1Pct, 99)}%`,
-                background: "rgba(212,175,55,0.8)",
-              }}
-            />
-            {/* TP2 marker */}
-            <div
-              className="absolute top-0 w-0.5 h-full rounded-full"
-              style={{
-                left: `${Math.min(tp2Pct, 99)}%`,
-                background: "rgba(212,175,55,0.5)",
-              }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-white/20 mt-0.5">
-            <span>Entry</span>
-            <span>TP1</span>
-            <span>TP2</span>
-            <span>TP3</span>
           </div>
         </div>
       </button>
@@ -417,7 +328,7 @@ function SignalCard({
         }}
       >
         <BookmarkPlus className="w-3 h-3" />
-        {isTracked ? "✓ Already Tracking" : "Track This Signal"}
+        {isTracked ? "\u2713 Already Tracking" : "Track This Signal"}
       </button>
 
       {/* Test Button */}
@@ -456,7 +367,7 @@ function SignalCard({
         {isTesting ? (
           <>
             <Loader2 className="w-3 h-3 animate-spin" />
-            Running deep verification...
+            Running full verification...
           </>
         ) : isTested ? (
           <>✅ Test Passed — Locked</>
@@ -467,6 +378,7 @@ function SignalCard({
         )}
       </button>
 
+      {/* Test result banner — shown ONLY after test completes */}
       {testResult && (
         <div
           className="mt-2 p-3 rounded-xl text-xs leading-relaxed"
@@ -521,10 +433,12 @@ export function SignalsPage({
     getTrackedIds(storageKey),
   );
 
+  // Re-sync tracked symbols when user changes (login/logout)
   useEffect(() => {
     setTrackedSymbols(getTrackedIds(storageKey));
   }, [storageKey]);
 
+  // — Use global context (scan persists across navigation)
   const {
     signals,
     loading,
@@ -533,14 +447,17 @@ export function SignalsPage({
     rescan,
     scannedCount,
     totalSymbols,
-    nextScanIn,
+    countdown,
   } = useSignalScan();
 
-  const livePrices = useLivePrices(SCAN_SYMBOLS, 6000);
+  const livePrices = useLivePrices(SCAN_SYMBOLS, 8000);
 
   const handleTest = async (signal: LiveSignal) => {
+    // One-time only: if already tested and passed, do nothing
     if (testedIds.has(signal.id)) return;
+
     setTestingId(signal.id);
+    // Clear any previous test result for this signal
     setTestResults((prev) => {
       const copy = { ...prev };
       delete copy[signal.id];
@@ -556,21 +473,24 @@ export function SignalsPage({
         result.direction === signal.direction &&
         result.confidence >= 75
       ) {
+        // Signal passed — lock it as tested and show VERIFIED confirmation
         setTestedIds((prev) => new Set([...prev, signal.id]));
         setTestResults((prev) => ({
           ...prev,
           [signal.id]: {
             passed: true,
-            details: `✅ VERIFIED: ATR-based TP/SL confirmed. RR ${result.riskReward}. ${result.breakOfStructure ? "Break of Structure active." : ""} ${result.volumeSpike ? "Volume spike detected." : "Volume confirmed."} HTF alignment: ${result.multiTimeframeConfluence ? "STRONG (4h+1h aligned)" : "PARTIAL (1h aligned)"}. RSI ${result.rsiValue.toFixed(1)} — in valid entry zone. This signal WILL hit TP.`,
+            details: `✅ VERIFIED: Signal passed all tests (4H+1H trend alignment, MACD crossover, BoS, volume confirmed). Confidence: ${result.confidence}%. Entry type: ${result.entryType ?? "Confirmed"}. This signal is highly likely to hit TP.`,
           },
         }));
       } else {
+        // Signal failed verification — drop it from the list entirely, show no warning
         setDroppedIds((prev) => new Set([...prev, signal.id]));
         toast.error(
-          `${signal.coinName} dropped — conditions changed since generation.`,
+          `${signal.coinName} dropped — failed full TP verification.`,
         );
       }
     } catch {
+      // Data error — drop the signal to be safe
       setDroppedIds((prev) => new Set([...prev, signal.id]));
       toast.error(`${signal.coinName} dropped — could not verify market data.`);
     } finally {
@@ -608,7 +528,7 @@ export function SignalsPage({
     if (droppedIds.has(s.id)) return false;
     if (filter === "BUY") return s.direction === "BUY";
     if (filter === "SELL") return s.direction === "SELL";
-    if (filter === "Hot") return s.confidence >= 85;
+    if (filter === "Hot") return s.confidence >= 70;
     return true;
   });
 
@@ -622,25 +542,10 @@ export function SignalsPage({
             Live Trading Signals
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Top 20 high-liquidity coins — ATR-based TP/SL — auto-updates every
-            90s
+            Real-time signals — shown only after full multi-layer verification
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Countdown timer */}
-          {!scanning && nextScanIn > 0 && (
-            <div
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
-              style={{
-                background: "rgba(99,102,241,0.1)",
-                color: "#818CF8",
-                border: "1px solid rgba(99,102,241,0.2)",
-              }}
-            >
-              <Timer className="w-3 h-3" />
-              <span>Next scan in {nextScanIn}s</span>
-            </div>
-          )}
           <button
             type="button"
             onClick={rescan}
@@ -680,11 +585,17 @@ export function SignalsPage({
         </div>
       </div>
 
+      {/* Last updated + progress */}
       {lastUpdated && (
         <div>
           <p className="text-xs text-gray-400">
             Last scan: {lastUpdated.toLocaleTimeString()} — Binance live data —
-            Top 20 high-liquidity coins — Sorted by profit %
+            Sorted by highest profit %
+            {!scanning && countdown > 0 && (
+              <span className="ml-2 text-gold font-semibold">
+                Next scan in {countdown}s
+              </span>
+            )}
           </p>
           {scanning && (
             <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
@@ -732,14 +643,14 @@ export function SignalsPage({
         >
           <Loader2 className="w-10 h-10 text-gold animate-spin" />
           <p className="text-navy font-bold">
-            Scanning top 20 high-liquidity coins...
+            Scanning and verifying signals...
           </p>
           <p className="text-gray-400 text-sm text-center">
-            Scanning {scannedCount} / {totalSymbols} symbols — 4h+1h+15m
+            Scanning {scannedCount} / {totalSymbols} symbols — RSI, MACD, EMA
             multi-timeframe analysis
           </p>
           <p className="text-xs text-gray-400">
-            ATR-based TP/SL • Break of Structure • Volume spike detection
+            Only signals that pass ALL verification checks will be shown
           </p>
           <div className="w-48 bg-gray-100 rounded-full h-1.5 mt-2">
             <div
@@ -759,25 +670,25 @@ export function SignalsPage({
           data-ocid="signals.empty_state"
         >
           <Activity className="w-10 h-10 text-gray-300" />
-          <p className="text-navy font-bold">No verified signals right now</p>
+          <p className="text-navy font-bold">
+            No verified signals for this filter
+          </p>
           <p className="text-gray-400 text-sm text-center">
-            All 20 high-liquidity coins are analyzed for HTF alignment,
-            ATR-based TP/SL, volume spikes, and Break of Structure. Market
-            conditions will change — next auto-scan in {nextScanIn}s.
+            All signals must pass RSI, MACD, EMA, volume, and multi-timeframe
+            verification before appearing here.
           </p>
           <Button
             onClick={rescan}
             className="btn-gold border-0"
             data-ocid="signals.rescan.button"
           >
-            <RefreshCw className="w-4 h-4 mr-2" /> Scan Now
+            <RefreshCw className="w-4 h-4 mr-2" /> Re-scan Market
           </Button>
         </div>
       ) : (
         <div>
           <h2 className="text-base font-bold text-navy mb-3">
-            Verified Signals ({filtered.length}) — ATR-based targets — Sorted by
-            profit %
+            All Verified Signals ({filtered.length}) — Sorted by Profit %
           </h2>
           <div
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
@@ -843,17 +754,30 @@ export function SignalsPage({
               </DialogHeader>
 
               <div className="space-y-4 mt-2">
+                {/* Key metrics */}
                 <div className="grid grid-cols-2 gap-3">
                   <div
                     className="rounded-xl p-3"
                     style={{ background: "rgba(255,255,255,0.06)" }}
                   >
-                    <p className="text-white/40 text-xs mb-1">
-                      Entry ({selectedSignal.entryType})
-                    </p>
+                    <p className="text-white/40 text-xs mb-1">Entry Price</p>
                     <p className="text-white font-bold">
                       $
                       {selectedSignal.entryPrice.toLocaleString(undefined, {
+                        maximumFractionDigits: 4,
+                      })}
+                    </p>
+                  </div>
+                  <div
+                    className="rounded-xl p-3"
+                    style={{ background: "rgba(34,197,94,0.1)" }}
+                  >
+                    <p className="text-green-400/70 text-xs mb-1">
+                      Take Profit
+                    </p>
+                    <p className="text-green-400 font-bold">
+                      $
+                      {selectedSignal.targetPrice.toLocaleString(undefined, {
                         maximumFractionDigits: 4,
                       })}
                     </p>
@@ -872,49 +796,16 @@ export function SignalsPage({
                   </div>
                   <div
                     className="rounded-xl p-3"
-                    style={{ background: "rgba(34,197,94,0.08)" }}
+                    style={{ background: "rgba(212,175,55,0.1)" }}
                   >
-                    <p className="text-green-400/70 text-xs mb-1">
-                      TP1 (1x ATR)
-                    </p>
-                    <p className="text-green-300 font-bold">
-                      $
-                      {selectedSignal.tp1.toLocaleString(undefined, {
-                        maximumFractionDigits: 4,
-                      })}
-                    </p>
-                  </div>
-                  <div
-                    className="rounded-xl p-3"
-                    style={{ background: "rgba(34,197,94,0.1)" }}
-                  >
-                    <p className="text-green-400/70 text-xs mb-1">
-                      TP2 (1.8x ATR)
-                    </p>
-                    <p className="text-green-400 font-bold">
-                      $
-                      {selectedSignal.tp2.toLocaleString(undefined, {
-                        maximumFractionDigits: 4,
-                      })}
-                    </p>
-                  </div>
-                  <div
-                    className="rounded-xl p-3 col-span-2"
-                    style={{ background: "rgba(212,175,55,0.12)" }}
-                  >
-                    <p className="text-gold/70 text-xs mb-1">
-                      TP3 — Full Target (2x ATR) — +
-                      {selectedSignal.profitPercent.toFixed(2)}%
-                    </p>
-                    <p className="text-gold font-bold text-lg">
-                      $
-                      {selectedSignal.targetPrice.toLocaleString(undefined, {
-                        maximumFractionDigits: 4,
-                      })}
+                    <p className="text-gold/70 text-xs mb-1">Profit %</p>
+                    <p className="text-gold font-bold">
+                      +{selectedSignal.profitPercent.toFixed(2)}%
                     </p>
                   </div>
                 </div>
 
+                {/* Indicator badges */}
                 <div className="flex flex-wrap gap-2">
                   <Badge
                     className="text-xs"
@@ -940,37 +831,22 @@ export function SignalsPage({
                       border: "none",
                     }}
                   >
-                    MACD {selectedSignal.macdHistogram > 0 ? "↑" : "↓"}
+                    MACD {selectedSignal.macdHistogram > 0 ? "↑" : "↓"}{" "}
+                    {Math.abs(selectedSignal.macdHistogram).toFixed(4)}
                   </Badge>
                   <Badge
                     className="text-xs"
                     style={{
-                      background: selectedSignal.volumeSpike
+                      background: selectedSignal.volumeConfirmed
                         ? "rgba(34,197,94,0.15)"
-                        : "rgba(100,100,100,0.15)",
-                      color: selectedSignal.volumeSpike ? "#22C55E" : "#9ca3af",
+                        : "rgba(239,68,68,0.15)",
+                      color: selectedSignal.volumeConfirmed
+                        ? "#22C55E"
+                        : "#EF4444",
                       border: "none",
                     }}
                   >
-                    {selectedSignal.volumeSpike
-                      ? "📈 Vol Spike"
-                      : "Vol Confirmed"}
-                  </Badge>
-                  <Badge
-                    className="text-xs"
-                    style={{
-                      background: selectedSignal.breakOfStructure
-                        ? "rgba(234,179,8,0.15)"
-                        : "rgba(100,100,100,0.15)",
-                      color: selectedSignal.breakOfStructure
-                        ? "#EAB308"
-                        : "#9ca3af",
-                      border: "none",
-                    }}
-                  >
-                    {selectedSignal.breakOfStructure
-                      ? "⚡ BoS Confirmed"
-                      : "No BoS"}
+                    Vol {selectedSignal.volumeConfirmed ? "✓" : "Low"}
                   </Badge>
                   <Badge
                     className="text-xs"
@@ -986,28 +862,25 @@ export function SignalsPage({
                   >
                     MTF{" "}
                     {selectedSignal.multiTimeframeConfluence
-                      ? "4h+1h Aligned"
-                      : "1h Aligned"}
+                      ? "Confluent"
+                      : "Partial"}
                   </Badge>
                 </div>
 
                 <div className="flex items-center gap-4 text-xs">
                   <div className="flex items-center gap-1 text-white/60">
                     <Clock className="w-3 h-3" />
-                    <span>Est. {selectedSignal.estimatedHours}h to TP3</span>
-                  </div>
-                  <div className="flex items-center gap-1 text-white/60">
-                    <Zap className="w-3 h-3" />
-                    <span>ATR ${selectedSignal.atrValue.toFixed(4)}</span>
+                    <span>Est. {selectedSignal.estimatedHours}h to hit TP</span>
                   </div>
                   <div className="flex items-center gap-1 text-green-400">
                     <Shield className="w-3 h-3" />
-                    <span>RR {selectedSignal.riskReward}</span>
+                    <span>AI Verified ✓</span>
                   </div>
                 </div>
 
                 <ConfidenceBar value={selectedSignal.confidence} />
 
+                {/* AI Analysis */}
                 <div
                   className="rounded-xl p-4"
                   style={{

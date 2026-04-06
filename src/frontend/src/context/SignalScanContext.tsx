@@ -1,13 +1,7 @@
 /**
  * SignalScanContext — persistent signal scan that survives page navigation.
- *
- * v3 — Major improvements:
- * 1. Continuous re-scan every 90 seconds (markets are dynamic)
- * 2. Top 20 high-liquidity coins only (reduces noise, improves accuracy)
- * 3. No blacklist — markets reverse after stop hunts, blacklist kills re-entries
- * 4. Strict pre-filter: coins must have $50M+ 24h volume before analysis
- * 5. Signals de-duplicated: same symbol won't re-appear unless conditions improve
- * 6. Signals expire after 2 hours if not hit (stale signals removed)
+ * Scans top 20 high-liquidity coins only.
+ * Auto-rescans every 90 seconds. Countdown timer exposed for UI.
  */
 import {
   createContext,
@@ -30,13 +24,13 @@ export interface LiveSignal {
   direction: "BUY" | "SELL";
   entryPrice: number;
   targetPrice: number;
+  stopLoss: number;
   tp1: number;
   tp2: number;
-  stopLoss: number;
+  tp3: number;
   confidence: number;
   estimatedHours: number;
   riskReward: string;
-  rrRatio: number;
   aiAnalysis: string;
   currentPrice: number;
   rsiValue: number;
@@ -44,44 +38,35 @@ export interface LiveSignal {
   trend: "up" | "down" | "sideways";
   volumeConfirmed: boolean;
   volumeSpike: boolean;
+  bosConfirmed: boolean;
   multiTimeframeConfluence: boolean;
-  breakOfStructure: boolean;
   entryType: string;
   generatedAt: number;
   profitPercent: number;
-  atrValue: number;
 }
 
-/**
- * TOP 20 HIGH-LIQUIDITY COINS — selected for:
- * - High 24h trading volume ($1B+ daily)
- * - Deep order books (less manipulation)
- * - Predictable technical structure
- * - Strong institutional presence
- *
- * Fewer coins = better accuracy. Each coin gets proper analysis.
- */
+// Top 20 high-liquidity coins ($50M+ 24h volume consistently)
 export const SCAN_SYMBOLS = [
-  "BTC", // Bitcoin — most liquid
-  "ETH", // Ethereum
-  "BNB", // Binance Coin
-  "SOL", // Solana
-  "XRP", // Ripple
-  "ADA", // Cardano
-  "AVAX", // Avalanche
-  "DOGE", // Dogecoin (high volume)
-  "LINK", // Chainlink
-  "DOT", // Polkadot
-  "MATIC", // Polygon
-  "LTC", // Litecoin
-  "UNI", // Uniswap
-  "ATOM", // Cosmos
-  "NEAR", // NEAR Protocol
-  "OP", // Optimism
-  "ARB", // Arbitrum
-  "APT", // Aptos
-  "SUI", // Sui
-  "INJ", // Injective
+  "BTC",
+  "ETH",
+  "BNB",
+  "SOL",
+  "XRP",
+  "ADA",
+  "AVAX",
+  "DOT",
+  "MATIC",
+  "LINK",
+  "LTC",
+  "UNI",
+  "ATOM",
+  "NEAR",
+  "DOGE",
+  "SHIB",
+  "OP",
+  "ARB",
+  "INJ",
+  "SUI",
 ];
 
 export const COIN_NAMES: Record<string, string> = {
@@ -92,29 +77,22 @@ export const COIN_NAMES: Record<string, string> = {
   XRP: "Ripple",
   ADA: "Cardano",
   AVAX: "Avalanche",
-  DOGE: "Dogecoin",
-  LINK: "Chainlink",
   DOT: "Polkadot",
   MATIC: "Polygon",
+  LINK: "Chainlink",
   LTC: "Litecoin",
   UNI: "Uniswap",
   ATOM: "Cosmos",
   NEAR: "NEAR Protocol",
+  DOGE: "Dogecoin",
+  SHIB: "Shiba Inu",
   OP: "Optimism",
   ARB: "Arbitrum",
-  APT: "Aptos",
-  SUI: "Sui",
   INJ: "Injective",
+  SUI: "Sui",
 };
 
-// Minimum 24h USD volume for a coin to be scanned ($50M)
-const MIN_VOLUME_USD = 50_000_000;
-
-// How often to re-scan (90 seconds)
-const RESCAN_INTERVAL_MS = 90_000;
-
-// Signal TTL — signals older than 2 hours are considered stale and removed
-const SIGNAL_TTL_MS = 2 * 60 * 60 * 1000;
+const RESCAN_INTERVAL = 90; // seconds
 
 interface SignalScanContextType {
   signals: LiveSignal[];
@@ -123,8 +101,8 @@ interface SignalScanContextType {
   lastUpdated: Date | null;
   scannedCount: number;
   totalSymbols: number;
+  countdown: number;
   rescan: () => void;
-  nextScanIn: number; // seconds until next auto-scan
 }
 
 const SignalScanContext = createContext<SignalScanContextType>({
@@ -134,8 +112,8 @@ const SignalScanContext = createContext<SignalScanContextType>({
   lastUpdated: null,
   scannedCount: 0,
   totalSymbols: SCAN_SYMBOLS.length,
+  countdown: RESCAN_INTERVAL,
   rescan: () => {},
-  nextScanIn: 0,
 });
 
 export function SignalScanProvider({
@@ -146,27 +124,26 @@ export function SignalScanProvider({
   const [scanning, setScanning] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scannedCount, setScannedCount] = useState(0);
-  const [nextScanIn, setNextScanIn] = useState(0);
+  const [countdown, setCountdown] = useState(RESCAN_INTERVAL);
   const totalSymbols = SCAN_SYMBOLS.length;
 
+  // Prevent concurrent scans
   const scanRef = useRef(false);
+  // Ensure first scan only runs once even in StrictMode double-invoke
   const hasRunRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nextScanTimeRef = useRef<number>(0);
 
   const startCountdown = useCallback(() => {
     if (countdownRef.current) clearInterval(countdownRef.current);
-    nextScanTimeRef.current = Date.now() + RESCAN_INTERVAL_MS;
+    setCountdown(RESCAN_INTERVAL);
     countdownRef.current = setInterval(() => {
-      const remaining = Math.max(
-        0,
-        Math.round((nextScanTimeRef.current - Date.now()) / 1000),
-      );
-      setNextScanIn(remaining);
-      if (remaining === 0 && countdownRef.current) {
-        clearInterval(countdownRef.current);
-      }
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          if (countdownRef.current) clearInterval(countdownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
   }, []);
 
@@ -174,10 +151,11 @@ export function SignalScanProvider({
     if (scanRef.current) return;
     scanRef.current = true;
     setScanning(true);
+    setSignals([]);
     setScannedCount(0);
 
     try {
-      // Fetch all tickers first — pre-filter by volume
+      // Pre-filter: only include coins with sufficient 24h volume ($50M+)
       const tickers = await fetch24hTickers(SCAN_SYMBOLS);
       if (tickers.length === 0) {
         setLoading(false);
@@ -186,7 +164,6 @@ export function SignalScanProvider({
         return;
       }
 
-      // Build price map and volume-filter symbols
       const priceMap = Object.fromEntries(
         tickers.map((t) => [t.symbol, t.price]),
       );
@@ -194,25 +171,14 @@ export function SignalScanProvider({
         tickers.map((t) => [t.symbol, t.volume24h]),
       );
 
-      // Only analyze coins with sufficient liquidity
-      const eligibleSymbols = SCAN_SYMBOLS.filter((s) => {
-        const vol = volumeMap[s] ?? 0;
-        return vol >= MIN_VOLUME_USD;
-      });
-
-      // Remove stale signals (> 2h old)
-      const now = Date.now();
-      setSignals((prev) =>
-        prev.filter((s) => now - s.generatedAt < SIGNAL_TTL_MS),
-      );
-
-      // Track symbols already having an active signal (to update, not duplicate)
-      const newSignals: LiveSignal[] = [];
-
-      for (const symbol of eligibleSymbols) {
+      for (const symbol of SCAN_SYMBOLS) {
         const price = priceMap[symbol];
-        if (!price) {
+        const volume24h = volumeMap[symbol] ?? 0;
+
+        // Skip coins with insufficient liquidity
+        if (!price || volume24h < 50_000_000) {
           setScannedCount((prev) => prev + 1);
+          await new Promise((r) => setTimeout(r, 50));
           continue;
         }
 
@@ -221,7 +187,6 @@ export function SignalScanProvider({
             symbol,
             price,
           );
-
           if (analysis) {
             const newSignal: LiveSignal = {
               id: `${symbol}-${Date.now()}`,
@@ -230,13 +195,13 @@ export function SignalScanProvider({
               direction: analysis.direction as "BUY" | "SELL",
               entryPrice: analysis.entryPrice,
               targetPrice: analysis.targetPrice,
+              stopLoss: analysis.stopLoss,
               tp1: analysis.tp1,
               tp2: analysis.tp2,
-              stopLoss: analysis.stopLoss,
+              tp3: analysis.tp3,
               confidence: analysis.confidence,
               estimatedHours: analysis.estimatedHours,
               riskReward: analysis.riskReward,
-              rrRatio: analysis.rrRatio,
               aiAnalysis: analysis.analysis,
               currentPrice: price,
               rsiValue: analysis.rsiValue,
@@ -244,40 +209,23 @@ export function SignalScanProvider({
               trend: analysis.trend,
               volumeConfirmed: analysis.volumeConfirmed,
               volumeSpike: analysis.volumeSpike,
+              bosConfirmed: analysis.bosConfirmed,
               multiTimeframeConfluence: analysis.multiTimeframeConfluence,
-              breakOfStructure: analysis.breakOfStructure,
               entryType: analysis.entryType,
               generatedAt: Date.now(),
               profitPercent: analysis.profitPercent,
-              atrValue: analysis.atrValue,
             };
-            newSignals.push(newSignal);
+            setSignals((prev) =>
+              [...prev, newSignal].sort(
+                (a, b) => b.profitPercent - a.profitPercent,
+              ),
+            );
           }
         } catch {
           // Skip failed symbols silently
         }
-
         setScannedCount((prev) => prev + 1);
-        // Small delay to avoid hitting Binance rate limits
         await new Promise((r) => setTimeout(r, 150));
-      }
-
-      if (newSignals.length > 0) {
-        // Merge with existing: replace same-symbol signals, add new ones
-        setSignals((prev) => {
-          const existingBySymbol = Object.fromEntries(
-            prev.map((s) => [s.symbol, s]),
-          );
-          for (const ns of newSignals) {
-            existingBySymbol[ns.symbol] = ns;
-          }
-          return Object.values(existingBySymbol).sort(
-            (a, b) => b.profitPercent - a.profitPercent,
-          );
-        });
-      } else if (loading) {
-        // First scan found nothing — still clear loading
-        setSignals([]);
       }
 
       setLastUpdated(new Date());
@@ -287,35 +235,35 @@ export function SignalScanProvider({
       scanRef.current = false;
       startCountdown();
     }
-  }, [loading, startCountdown]);
+  }, [startCountdown]);
 
-  // Run once on mount
+  // Run ONCE on mount
   useEffect(() => {
     if (hasRunRef.current) return;
     hasRunRef.current = true;
     runScan();
   }, [runScan]);
 
-  // Auto re-scan every 90 seconds
+  // Auto-rescan every 90 seconds
   useEffect(() => {
-    timerRef.current = setInterval(() => {
-      runScan();
-    }, RESCAN_INTERVAL_MS);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    };
+    const id = setInterval(() => {
+      if (!scanRef.current) {
+        runScan();
+      }
+    }, RESCAN_INTERVAL * 1000);
+    return () => clearInterval(id);
   }, [runScan]);
 
+  // Cleanup countdown on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+
   const rescan = useCallback(() => {
-    // Reset auto-timer so it doesn't fire right after manual rescan
-    if (timerRef.current) clearInterval(timerRef.current);
-    runScan().then(() => {
-      timerRef.current = setInterval(() => {
-        runScan();
-      }, RESCAN_INTERVAL_MS);
-    });
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    runScan();
   }, [runScan]);
 
   return (
@@ -327,8 +275,8 @@ export function SignalScanProvider({
         lastUpdated,
         scannedCount,
         totalSymbols,
+        countdown,
         rescan,
-        nextScanIn,
       }}
     >
       {children}
