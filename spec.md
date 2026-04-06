@@ -1,37 +1,59 @@
 # Waltz Bots
 
 ## Current State
-- HomePage has hardcoded past dates for 100X coin TP hit dates (e.g., 2025-09-01 which are now in the past)
-- Trending coins section exists with 32 coins but only shows coins in a horizontal scroll row without entry/TP signals per card
-- Market status section shows BTC dominance and total market cap but labeled as 'BTC Dominance' without broader market context (Fear & Greed, top gainers, etc.)
-- FounderPage has the 'FOUNDER & CEO' badge positioned with `absolute -bottom-2` but the photo container has `z-10` and the badge has no explicit z-index, causing it to appear behind the photo border
-- No Feedback & Complaint page exists
-- AdminPanel has 3 tabs: Users, Posts, AI — no Feedback tab
-- Sidebar has 9 nav items — no Feedback entry
-- App.tsx has no 'feedback' tab route
+
+- **TrackingPage.tsx**: Shows tracked trades with live price, TP Hit banner (auto), Remove button, AI verdict, Update Verdict button (re-runs analyzeSymbol), and AI chat per card. No manual "mark as TP hit" or "mark as SL hit" buttons. No trade outcome (win/loss) recording. No deep analysis log.
+- **SignalsPage.tsx**: Shows signals filtered at confidence >= 45%. Does not filter out signals that historically hit stop loss. No SL-blacklist logic.
+- **FeedbackPage.tsx + AdminPanel FeedbackAdminTab**: AI generates a solution (rule-based). Admin can approve/reject. Approving simply marks status as "approved" — no action is taken on the app when approved. No upgrade/improvement log linked to approvals.
+- **AuthContext.tsx**: tradeHistory stores { total, wins, losses } per user. updateProfile saves to localStorage.
+- **SignalScanContext.tsx**: Scans 95+ symbols, confidence threshold 45%+.
 
 ## Requested Changes (Diff)
 
 ### Add
-- FeedbackPage component: form to submit feedback/complaint (type selector, subject, message); AI bot auto-generates a suggested solution after 2s delay; feedback stored in localStorage `wb_feedback` permanently; each entry has: id, type, subject, message, aiSolution, status (pending/approved/rejected), timestamp, userName
-- Admin Feedback tab in AdminPanel: 4th tab showing all submitted feedback/complaints; each row shows submitter, type, subject, AI solution, Approve/Reject buttons; approved/rejected permanently stored
-- 'FEEDBACK' entry in Sidebar navigation with MessageSquare icon
-- 'feedback' route in App.tsx TabId and renderPage switch
+1. **TrackingPage — Manual outcome buttons**: Each tracked trade card gets two new buttons:
+   - "Mark TP Hit" (green) — manually marks trade as won
+   - "Mark SL Hit" (red) — manually marks trade as lost
+   Both update win/loss stats in AuthContext (updateProfile tradeHistory), mark the trade as closed (`outcome: 'win' | 'loss'`), and send it to a "Trade Analysis" log (stored as `wb_trade_analysis` in localStorage).
+2. **TrackingPage — Auto SL detection banner**: When live price crosses stop loss, show a red pulsing "⛔ STOP LOSS HIT" banner (similar to existing TP Hit green banner). Auto-fire the loss outcome logic, update win/loss stats, and log to trade analysis.
+3. **TrackingPage — Deep Analysis log section**: Below the tracked trades grid, show a collapsible "Trade History & Deep Analysis" section. Lists all closed trades (win/loss) from `wb_trade_analysis_<uid>`. Each entry shows: symbol, direction, entry, TP/SL hit, outcome (WIN/LOSS), time closed, and an AI analysis note about what can be learned from this trade.
+4. **FeedbackPage — Approval action log**: When admin approves a feedback/complaint, log the approval with the AI solution into `wb_improvement_log` in localStorage. This log is visible in the Admin Panel > Feedback tab as "Approved Improvements" subsection — showing what has been acted on.
+5. **SignalsPage — SL blacklist**: Read `wb_trade_analysis_<uid>` (or global `wb_sl_hits` list). Any symbol that has hit stop loss in tracked history is added to a blacklist. The signal scanner skips blacklisted symbols, so they never appear again in the signals list.
 
 ### Modify
-- 100X coin TP hit dates: replace hardcoded past dates with dynamically computed future dates using `Date.now()` + offsets (3–18 months ahead), formatted as dd/mm/yyyy
-- Trending coins: keep full 32-coin list but add entry price and TP signal fields per card (entry = live price, TP = live price × multiplier), show in detail dialog too
-- Market status section: fetch total crypto market cap and Fear & Greed index from CoinGecko public API (`/api/v3/global`); show total market cap, BTC dominance, ETH dominance, market sentiment, 24h market change; show top 3 gainers from live data
-- FounderPage badge: add `z-20` to the CEO badge div and ensure the photo container stays at `z-10`, so badge is always visually in front of the photo
+1. **TrackingPage — TP Hit auto outcome**: When the auto TP Hit banner fires (live price >= TP), automatically record win outcome to tradeHistory and trade analysis log (same as manual Mark TP Hit), but only once per trade.
+2. **TrackingPage — TrackedTrade interface**: Add `outcome?: 'win' | 'loss' | 'open'` and `closedAt?: string` fields.
+3. **FeedbackPage — AI solution label**: Change "AI Assistant" label to "AI Rectification" to reflect that the solution is a rectification/improvement action.
+4. **AdminPanel FeedbackAdminTab**: Add "Approved Improvements" subsection showing entries from `wb_improvement_log`. Each entry shows the subject, AI rectification, and date approved.
+5. **SignalScanContext — confidence threshold**: Keep at 45% minimum but add hard SL blacklist filter: skip symbols in `wb_sl_hits` global key.
 
 ### Remove
-- Nothing removed
+- Nothing removed.
 
 ## Implementation Plan
-1. Fix FounderPage badge z-index (simple CSS change)
-2. Fix 100X dates in HomePage to be dynamically future-dated
-3. Enhance trending coin cards to show entry + TP signal inline
-4. Enhance market status to fetch from CoinGecko global API with Fear & Greed and top coins
-5. Create `FeedbackPage.tsx` with AI response simulation and localStorage persistence
-6. Add FeedbackAdminTab to AdminPanel as 4th tab
-7. Add 'feedback' to App.tsx TabId, renderPage, and Sidebar
+
+1. **TrackingPage.tsx**:
+   - Add `outcome` and `closedAt` to `TrackedTrade` interface
+   - Add `closeTradeAsWin(trade)` and `closeTradeAsLoss(trade)` helper functions:
+     - Save to `wb_trade_analysis_<uid>` in localStorage
+     - Call `updateProfile` to increment tradeHistory wins or losses
+     - Update trade in tracked list with `outcome` set and optionally remove from active tracking (keep in history but mark closed)
+   - Add "Mark TP Hit" (green) and "Mark SL Hit" (red) buttons to each TrackCard that is still `outcome === undefined` or `'open'`
+   - Auto-detect SL hit: same logic as TP hit useEffect — when livePrice <= stopLoss (for BUY) or livePrice >= stopLoss (for SELL), show red pulsing "⛔ STOP LOSS HIT" banner and auto-call closeTradeAsLoss once
+   - Auto-detect TP hit: extend existing TP hit useEffect to also call closeTradeAsWin once
+   - Add collapsible "Trade History & Deep Analysis" section below main grid, reading from `wb_trade_analysis_<uid>`
+
+2. **FeedbackPage.tsx**:
+   - Rename "AI Assistant" label to "AI Rectification" throughout
+
+3. **AdminPanel.tsx — FeedbackAdminTab**:
+   - On handleApprove: also write approved item to `wb_improvement_log` in localStorage
+   - Add "Approved Improvements" subsection at bottom of FeedbackAdminTab that reads and renders `wb_improvement_log` entries
+
+4. **SignalScanContext.tsx**:
+   - Before scanning each symbol, check `wb_sl_hits` key in localStorage (array of symbol strings)
+   - Skip any symbol in that blacklist
+   - When `closeTradeAsLoss` fires in TrackingPage, also push symbol to `wb_sl_hits` list
+
+5. **AuthContext.tsx**:
+   - No structural changes needed — `updateProfile({ tradeHistory: ... })` already works

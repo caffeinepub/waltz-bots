@@ -2,6 +2,7 @@
  * SignalScanContext — persistent signal scan that survives page navigation.
  * The scan runs ONCE when the provider mounts.
  * Rescans only happen when rescan() is called manually.
+ * Symbols that previously hit stop loss are blacklisted and excluded from future scans.
  */
 import {
   createContext,
@@ -291,7 +292,18 @@ export function SignalScanProvider({
         tickers.map((t) => [t.symbol, t.price]),
       );
 
+      // Load SL blacklist — symbols that previously hit stop loss are excluded
+      const slHits: string[] = JSON.parse(
+        localStorage.getItem("wb_sl_hits") ?? "[]",
+      );
+
       for (const symbol of SCAN_SYMBOLS) {
+        // Skip symbols blacklisted due to previous SL hits
+        if (slHits.includes(symbol)) {
+          setScannedCount((prev) => prev + 1);
+          continue;
+        }
+
         const price = priceMap[symbol];
         if (!price) {
           setScannedCount((prev) => prev + 1);

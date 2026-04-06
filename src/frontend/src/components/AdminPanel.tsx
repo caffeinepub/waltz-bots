@@ -30,6 +30,7 @@ import {
   MessageSquare,
   Plus,
   Shield,
+  Sparkles,
   Trash2,
   UserCheck,
   Users,
@@ -49,6 +50,16 @@ interface AdminPost {
   photo?: string;
   isPromo: boolean;
   createdAt: string;
+}
+
+interface ImprovementLogEntry {
+  id: string;
+  subject: string;
+  aiRectification: string;
+  type: string;
+  approvedAt: string;
+  userId: string;
+  userName: string;
 }
 
 function loadPosts(): AdminPost[] {
@@ -595,6 +606,9 @@ const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 
 function FeedbackAdminTab() {
   const [items, setItems] = useState<FeedbackItem[]>([]);
+  const [improvementLog, setImprovementLog] = useState<ImprovementLogEntry[]>(
+    [],
+  );
 
   useEffect(() => {
     try {
@@ -603,6 +617,18 @@ function FeedbackAdminTab() {
       setItems([]);
     }
   }, []);
+
+  // Refresh improvement log when items change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: items is intentionally used as a trigger
+  useEffect(() => {
+    try {
+      setImprovementLog(
+        JSON.parse(localStorage.getItem("wb_improvement_log") ?? "[]"),
+      );
+    } catch {
+      setImprovementLog([]);
+    }
+  }, [items]);
 
   const saveAndUpdate = (updated: FeedbackItem[]) => {
     try {
@@ -614,11 +640,31 @@ function FeedbackAdminTab() {
   };
 
   const handleApprove = (id: string) => {
+    const item = items.find((i) => i.id === id);
     const updated = items.map((i) =>
       i.id === id ? { ...i, adminStatus: "approved" as const } : i,
     );
     saveAndUpdate(updated);
-    toast.success("Submission approved.");
+
+    // Log improvement when admin approves
+    if (item) {
+      const log: ImprovementLogEntry[] = JSON.parse(
+        localStorage.getItem("wb_improvement_log") ?? "[]",
+      );
+      log.unshift({
+        id: `imp-${Date.now()}`,
+        subject: item.subject,
+        aiRectification: item.aiSolution,
+        type: item.type,
+        approvedAt: new Date().toISOString(),
+        userId: item.userId,
+        userName: item.userName,
+      });
+      localStorage.setItem("wb_improvement_log", JSON.stringify(log));
+      setImprovementLog(log);
+    }
+
+    toast.success("Submission approved and improvement logged.");
   };
 
   const handleReject = (id: string) => {
@@ -758,7 +804,7 @@ function FeedbackAdminTab() {
                   {item.message}
                 </p>
 
-                {/* AI solution */}
+                {/* AI Rectification */}
                 <div
                   className="rounded-xl p-3 mb-3"
                   style={{
@@ -769,12 +815,12 @@ function FeedbackAdminTab() {
                   <div className="flex items-center gap-2 mb-1">
                     <Brain className="w-3.5 h-3.5 text-gold" />
                     <span className="text-gold text-xs font-bold">
-                      AI Solution
+                      AI Rectification
                     </span>
                   </div>
                   <p className="text-white/70 text-xs leading-relaxed">
                     {item.aiStatus === "analyzing"
-                      ? "🤖 AI is analyzing..."
+                      ? "🤖 AI is analyzing and preparing rectification..."
                       : item.aiSolution || "No solution generated."}
                   </p>
                 </div>
@@ -788,7 +834,8 @@ function FeedbackAdminTab() {
                       onClick={() => handleApprove(item.id)}
                       className="flex-1 bg-green-500 hover:bg-green-600 text-white border-0"
                     >
-                      <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
+                      <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve &
+                      Apply
                     </Button>
                     <Button
                       data-ocid={`admin.feedback.delete_button.${i + 1}`}
@@ -804,6 +851,85 @@ function FeedbackAdminTab() {
               </motion.div>
             );
           })}
+        </div>
+      )}
+
+      {/* Approved Improvements Log */}
+      {improvementLog.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="w-4 h-4 text-green-600" />
+            <h4 className="font-bold text-navy text-sm">
+              Approved Improvements ({improvementLog.length})
+            </h4>
+            <span
+              className="ml-auto px-2 py-0.5 rounded-full text-xs font-bold"
+              style={{
+                background: "rgba(34,197,94,0.1)",
+                color: "#16A34A",
+                border: "1px solid rgba(34,197,94,0.2)",
+              }}
+            >
+              ✅ Applied &amp; Live
+            </span>
+          </div>
+          <div
+            className="space-y-2"
+            data-ocid="admin.feedback.improvements.list"
+          >
+            {improvementLog.map((entry, i) => {
+              const tc = TYPE_COLORS[entry.type] ?? TYPE_COLORS.feedback;
+              return (
+                <div
+                  key={entry.id}
+                  data-ocid={`admin.feedback.improvements.item.${i + 1}`}
+                  className="rounded-xl p-3"
+                  style={{
+                    background: "rgba(255,255,255,0.9)",
+                    border: "1px solid rgba(34,197,94,0.25)",
+                    borderLeft: "4px solid #22C55E",
+                    boxShadow: "0 2px 6px rgba(34,197,94,0.08)",
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="px-1.5 py-0.5 rounded text-xs font-bold"
+                        style={{
+                          background: tc.bg,
+                          color: tc.text,
+                        }}
+                      >
+                        {TYPE_LABELS[entry.type] ?? entry.type}
+                      </span>
+                      <p className="font-semibold text-navy text-xs">
+                        {entry.subject}
+                      </p>
+                    </div>
+                    <p className="text-xs text-gray-400 flex-shrink-0">
+                      {new Date(entry.approvedAt).toLocaleDateString("en-GB")}
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-1.5 leading-relaxed">
+                    {entry.aiRectification.length > 180
+                      ? `${entry.aiRectification.slice(0, 180)}...`
+                      : entry.aiRectification}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    Submitted by:{" "}
+                    <span className="font-medium text-navy">
+                      {entry.userName}
+                    </span>{" "}
+                    • Approved &amp; applied{" "}
+                    {new Date(entry.approvedAt).toLocaleTimeString("en-GB", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

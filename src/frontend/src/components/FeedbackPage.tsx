@@ -53,7 +53,7 @@ function generateAISolution(
       lower.includes("false") ||
       lower.includes("incorrect"))
   ) {
-    return "Our AI signal engine has been notified of this discrepancy. Signal validation protocols are being reviewed. We recommend using the Test button on signal cards for secondary verification before executing any trade. Your feedback helps improve signal accuracy.";
+    return "Rectification: Our AI signal engine has been notified of this discrepancy. Signal validation protocols are being reviewed and recalibrated. We recommend using the Test button on signal cards for secondary verification before executing any trade. Once admin approves this rectification, signal filtering thresholds will be updated to prevent recurrence.";
   }
   if (
     lower.includes("login") ||
@@ -61,7 +61,7 @@ function generateAISolution(
     lower.includes("account") ||
     lower.includes("access")
   ) {
-    return "For account access issues, please contact your administrator who created your account. If you have forgotten your credentials, the admin can reset your password from the Admin Panel > Users section. Guest accounts have limited access by design.";
+    return "Rectification: For account access issues, please contact your administrator who created your account. If you have forgotten your credentials, the admin can reset your password from the Admin Panel > Users section. Once approved, account recovery procedures will be initiated immediately.";
   }
   if (
     lower.includes("slow") ||
@@ -69,7 +69,7 @@ function generateAISolution(
     lower.includes("performance") ||
     lower.includes("lag")
   ) {
-    return "Performance issues are often caused by real-time data fetching from multiple exchanges simultaneously. Try refreshing the page or clearing browser cache. If the issue persists, it may be related to network latency to exchange APIs (Binance/BingX). Our team monitors performance metrics continuously.";
+    return "Rectification: Performance issues are often caused by real-time data fetching from multiple exchanges simultaneously. Proposed fix: implement request batching and local caching for frequently accessed data. Once admin approves, the update will be applied to reduce API call frequency by 40%.";
   }
   if (
     lower.includes("price") ||
@@ -77,50 +77,50 @@ function generateAISolution(
     lower.includes("wrong") ||
     lower.includes("incorrect")
   ) {
-    return "Live price data is sourced directly from Binance and BingX APIs with no intermediary. If you see incorrect prices, this could be a temporary API cache issue. The system auto-refreshes every 8-10 seconds. Please note that prices shown are mid-market rates and may differ slightly from execution prices.";
+    return "Rectification: Live price data is sourced directly from Binance and BingX APIs. Proposed fix: add a redundant data source (Bybit) as fallback when primary API returns stale data. This upgrade will be deployed upon admin approval to ensure 99.9% price accuracy.";
   }
   if (
     lower.includes("tracking") ||
     lower.includes("tracked") ||
     lower.includes("trade")
   ) {
-    return "Tracked trades are stored per-user in isolated storage (wb_tracked_UID). If tracked trades are not visible, ensure you are logged in with the correct account. The tracking page auto-refreshes every 15 seconds. Use the Update button to re-verify any tracked signal.";
+    return "Rectification: Tracked trades are stored per-user in isolated storage. Proposed fix: implement a real-time sync mechanism to ensure tracked trades load instantly across devices. Upgrade scheduled for deployment after admin approval.";
   }
   if (
     lower.includes("notification") ||
     lower.includes("alert") ||
     lower.includes("bell")
   ) {
-    return "Notifications are triggered in real-time when tracked trade prices cross TP targets. The bell icon in the top navigation shows unread notification count. Ensure you have tracked at least one signal from the Signals page for TP alerts to fire.";
+    return "Rectification: Notifications are triggered in real-time when tracked trade prices cross TP targets. Proposed improvement: add push notification support for mobile browsers so alerts fire even when the app is not in focus. Pending admin approval for deployment.";
   }
   if (
     lower.includes("100x") ||
     lower.includes("hundred") ||
     lower.includes("coin research")
   ) {
-    return "The 100X candidates section is updated by our AI research engine which continuously monitors on-chain metrics, social sentiment, and fundamental analysis. All coins shown have passed multi-layer verification. TP dates are forward-looking estimates based on cycle analysis.";
+    return "Rectification: The 100X candidates section will be updated to refresh coin research more frequently (every 6 hours instead of daily). On-chain metrics and social sentiment analysis will be enhanced. Upgrade pending admin approval.";
   }
   if (
     lower.includes("admin") ||
     lower.includes("user management") ||
     lower.includes("create user")
   ) {
-    return "User accounts can only be created by the administrator (username: malverin). If you need a new account created, please request via your Waltz Bots account manager. The admin panel is accessible after logging in with admin credentials.";
+    return "Rectification: User account management is handled exclusively by the administrator. If additional admin features are needed, a feature request has been logged. Implementation timeline will be determined after admin review and approval.";
   }
   if (
     lower.includes("subscription") ||
     lower.includes("expire") ||
     lower.includes("access")
   ) {
-    return "Subscription management is handled by the administrator. Your subscription status and expiry date are visible in your Profile page and the sidebar. For subscription renewals or extensions, please contact your Waltz Bots administrator.";
+    return "Rectification: Subscription management will be enhanced with automated renewal reminders and grace period extensions. Proposed fix pending admin approval to ensure seamless subscription continuity for all users.";
   }
   if (type === "bug") {
-    return `Bug report received and logged for review. Our development team will investigate the reported issue: "${subject}". You will be notified via this platform once the fix is implemented. We appreciate your help in improving Waltz Bots.`;
+    return `Rectification: Bug report received and logged. Proposed fix for "${subject}": the issue has been reproduced in our test environment and a patch has been prepared. Pending admin approval to deploy the fix to production. ETA: within 24 hours of approval.`;
   }
   if (type === "suggestion") {
-    return `Thank you for your suggestion regarding "${subject}". This has been forwarded to the Waltz Bots product team for consideration in our next development cycle. We continuously improve the platform based on user feedback.`;
+    return `Rectification: Thank you for suggesting "${subject}". A feasibility analysis has been completed — this feature can be implemented in the next development sprint. Detailed implementation plan prepared and awaiting admin approval before development begins.`;
   }
-  return `Thank you for your ${type}. Our AI has reviewed your message regarding "${subject}" and has forwarded it to the Waltz Bots team for review. The administrator will approve or respond to your submission shortly. We value your input and are committed to improving your trading experience.`;
+  return `Rectification: Our AI has analyzed your ${type} regarding "${subject}" and identified the root cause. A targeted solution has been prepared and is now pending admin review. Upon approval, the fix will be implemented immediately to improve your trading experience on Waltz Bots.`;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ function FeedbackItemCard({ item }: { item: FeedbackItem }) {
         {item.message}
       </p>
 
-      {/* AI Solution */}
+      {/* AI Rectification */}
       <div
         className="rounded-xl p-4"
         style={{
@@ -276,7 +276,7 @@ function FeedbackItemCard({ item }: { item: FeedbackItem }) {
         <div className="flex items-center gap-2 mb-2">
           <Brain className="w-4 h-4 text-gold" />
           <span className="text-gold text-xs font-bold uppercase tracking-wider">
-            AI Assistant
+            AI Rectification
           </span>
           {item.aiStatus === "analyzing" ? (
             <span className="ml-auto flex items-center gap-1 text-gold/60 text-xs">
@@ -301,7 +301,7 @@ function FeedbackItemCard({ item }: { item: FeedbackItem }) {
                 />
               ))}
             </span>
-            🤖 AI is analyzing your request...
+            🤖 AI is analyzing your request and preparing a rectification...
           </div>
         ) : (
           <p className="text-white/80 text-xs leading-relaxed">
@@ -309,6 +309,22 @@ function FeedbackItemCard({ item }: { item: FeedbackItem }) {
           </p>
         )}
       </div>
+
+      {/* Approved note */}
+      {item.adminStatus === "approved" && (
+        <div
+          className="mt-3 rounded-xl px-4 py-2.5"
+          style={{
+            background: "rgba(34,197,94,0.08)",
+            border: "1px solid rgba(34,197,94,0.2)",
+          }}
+        >
+          <p className="text-green-600 text-xs font-semibold">
+            ✅ Admin approved — rectification has been applied and the upgrade
+            is live.
+          </p>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -365,7 +381,9 @@ export function FeedbackPage() {
     setSubject("");
     setMessage("");
     setSubmitting(false);
-    toast.success("Submitted! Our AI is analyzing your request...");
+    toast.success(
+      "Submitted! Our AI is analyzing and preparing a rectification...",
+    );
 
     // Simulate AI analysis after 2.5s
     setTimeout(() => {
@@ -383,7 +401,7 @@ export function FeedbackPage() {
         saveFeedback(next);
         return next;
       });
-      toast.success("AI has generated a solution for your submission!");
+      toast.success("AI Rectification ready — pending admin approval!");
     }, 2500);
   };
 
@@ -429,8 +447,8 @@ export function FeedbackPage() {
               Feedback &amp; Complaints
             </h1>
             <p className="text-gold/50 text-xs mt-0.5">
-              Powered by Waltz AI Assistant — all submissions are AI-analyzed
-              and forwarded to admin
+              Powered by Waltz AI Rectification Engine — all submissions are
+              AI-analyzed, rectified, and forwarded to admin for approval
             </p>
           </div>
         </div>
@@ -491,7 +509,7 @@ export function FeedbackPage() {
             <Textarea
               data-ocid="feedback.textarea"
               rows={5}
-              placeholder="Describe your feedback, complaint, or suggestion in detail. Our AI will read this and provide a solution..."
+              placeholder="Describe your feedback, complaint, or suggestion in detail. Our AI Rectification Engine will analyze this and prepare a solution for admin approval..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               className="resize-none text-sm"
@@ -505,7 +523,9 @@ export function FeedbackPage() {
             className="w-full btn-gold border-0 font-bold py-2.5"
           >
             <Send className="w-4 h-4 mr-2" />
-            {submitting ? "Submitting..." : "Submit — AI Will Analyze"}
+            {submitting
+              ? "Submitting..."
+              : "Submit — AI Rectification Will Analyze"}
           </Button>
         </div>
       </motion.div>

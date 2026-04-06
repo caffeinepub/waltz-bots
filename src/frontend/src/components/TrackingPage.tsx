@@ -10,23 +10,45 @@ import {
   Bot,
   Brain,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   MessageCircle,
   RefreshCw,
   Send,
   Target,
   Trash2,
+  TrendingDown,
   TrendingUp,
   XCircle,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 // TrackedTrade extends LiveSignal with tracking-specific fields
 interface TrackedTrade extends LiveSignal {
   addedAt: string;
   aiVerdict: "LIKELY" | "UNCERTAIN" | "UNLIKELY";
   aiSuggestion: string;
+  outcome?: "win" | "loss" | "open";
+  closedAt?: string;
+}
+
+interface TradeAnalysisEntry {
+  id: string;
+  symbol: string;
+  coinName: string;
+  direction: "BUY" | "SELL";
+  entryPrice: number;
+  closePrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  outcome: "win" | "loss";
+  profitPercent: number;
+  closedAt: string;
+  addedAt: string;
+  aiNote: string;
 }
 
 interface ChatMsg {
@@ -123,6 +145,8 @@ function TrackCard({
   isUpdating,
   updateResult,
   onRemove,
+  onCloseWin,
+  onCloseLoss,
 }: {
   trade: TrackedTrade;
   livePrice: number;
@@ -130,6 +154,8 @@ function TrackCard({
   isUpdating: boolean;
   updateResult: UpdateResultData | null;
   onRemove: () => void;
+  onCloseWin: () => void;
+  onCloseLoss: () => void;
 }) {
   const { addNotification } = useNotifications();
   const isBuy = trade.direction === "BUY";
@@ -147,11 +173,23 @@ function TrackCard({
     ? livePrice >= trade.targetPrice
     : livePrice <= trade.targetPrice;
 
+  // Detect SL hit
+  const slHit = isBuy
+    ? livePrice <= trade.stopLoss
+    : livePrice >= trade.stopLoss;
+
   // Track whether we've already fired the TP notification for this trade
   const tpNotifiedRef = useRef(false);
+  const slNotifiedRef = useRef(false);
 
+  // TP hit effect — fire notification and auto-close as win
   useEffect(() => {
-    if (tpHit && !tpNotifiedRef.current) {
+    if (
+      tpHit &&
+      !tpNotifiedRef.current &&
+      trade.outcome !== "win" &&
+      trade.outcome !== "loss"
+    ) {
       tpNotifiedRef.current = true;
       addNotification({
         type: "tp_hit",
@@ -159,8 +197,42 @@ function TrackCard({
         message: `${trade.symbol} reached take profit target of $${trade.targetPrice.toFixed(4)}`,
         symbol: trade.symbol,
       });
+      onCloseWin();
     }
-  }, [tpHit, trade.symbol, trade.targetPrice, addNotification]);
+  }, [
+    tpHit,
+    trade.symbol,
+    trade.targetPrice,
+    trade.outcome,
+    addNotification,
+    onCloseWin,
+  ]);
+
+  // SL hit effect — fire notification and auto-close as loss
+  useEffect(() => {
+    if (
+      slHit &&
+      !slNotifiedRef.current &&
+      trade.outcome !== "win" &&
+      trade.outcome !== "loss"
+    ) {
+      slNotifiedRef.current = true;
+      addNotification({
+        type: "tp_hit",
+        title: "⛔ Stop Loss Hit",
+        message: `${trade.symbol} hit stop loss at $${trade.stopLoss.toFixed(4)}`,
+        symbol: trade.symbol,
+      });
+      onCloseLoss();
+    }
+  }, [
+    slHit,
+    trade.symbol,
+    trade.stopLoss,
+    trade.outcome,
+    addNotification,
+    onCloseLoss,
+  ]);
 
   // Recompute verdict from live data
   const { verdict, suggestion } = computeVerdict(trade, livePrice);
@@ -184,6 +256,8 @@ function TrackCard({
     }, 100);
   };
 
+  const isClosed = trade.outcome === "win" || trade.outcome === "loss";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -192,17 +266,28 @@ function TrackCard({
       style={{
         background: "linear-gradient(135deg, #0B1F3B, #0A254A)",
         border: `1px solid ${
-          tpHit
+          trade.outcome === "win"
             ? "rgba(34,197,94,0.8)"
-            : isBuy
-              ? "rgba(34,197,94,0.25)"
-              : "rgba(239,68,68,0.25)"
+            : trade.outcome === "loss"
+              ? "rgba(239,68,68,0.8)"
+              : tpHit
+                ? "rgba(34,197,94,0.8)"
+                : slHit
+                  ? "rgba(239,68,68,0.8)"
+                  : isBuy
+                    ? "rgba(34,197,94,0.25)"
+                    : "rgba(239,68,68,0.25)"
         }`,
-        boxShadow: tpHit ? "0 0 20px rgba(34,197,94,0.3)" : undefined,
+        boxShadow:
+          trade.outcome === "win" || tpHit
+            ? "0 0 20px rgba(34,197,94,0.3)"
+            : trade.outcome === "loss" || slHit
+              ? "0 0 20px rgba(239,68,68,0.3)"
+              : undefined,
       }}
     >
       {/* TP Hit Banner */}
-      {tpHit && (
+      {(tpHit || trade.outcome === "win") && (
         <div
           className="animate-pulse px-4 py-2 text-center font-black text-sm"
           style={{
@@ -215,6 +300,23 @@ function TrackCard({
           🎯 TP HIT! TARGET REACHED
         </div>
       )}
+
+      {/* SL Hit Banner */}
+      {(slHit || trade.outcome === "loss") &&
+        !tpHit &&
+        trade.outcome !== "win" && (
+          <div
+            className="animate-pulse px-4 py-2 text-center font-black text-sm"
+            style={{
+              background: "linear-gradient(90deg, #DC2626, #EF4444)",
+              color: "white",
+              letterSpacing: "0.05em",
+            }}
+            data-ocid="tracking.sl_hit.error_state"
+          >
+            ⛔ STOP LOSS HIT
+          </div>
+        )}
 
       <div className="p-5">
         {/* Header */}
@@ -388,6 +490,46 @@ function TrackCard({
           )}
         </button>
 
+        {/* Manual Mark TP / SL buttons */}
+        <div className="flex gap-2 mb-2">
+          <button
+            type="button"
+            data-ocid="tracking.mark_win.button"
+            onClick={onCloseWin}
+            disabled={isClosed}
+            className="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+            style={{
+              background: isClosed
+                ? "rgba(100,116,139,0.1)"
+                : "rgba(34,197,94,0.15)",
+              color: isClosed ? "#64748B" : "#22C55E",
+              border: `1px solid ${isClosed ? "rgba(100,116,139,0.2)" : "rgba(34,197,94,0.3)"}`,
+              cursor: isClosed ? "not-allowed" : "pointer",
+              opacity: isClosed ? 0.5 : 1,
+            }}
+          >
+            <CheckCircle2 className="w-3 h-3" />✅ Mark TP Hit
+          </button>
+          <button
+            type="button"
+            data-ocid="tracking.mark_loss.button"
+            onClick={onCloseLoss}
+            disabled={isClosed}
+            className="flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+            style={{
+              background: isClosed
+                ? "rgba(100,116,139,0.1)"
+                : "rgba(239,68,68,0.15)",
+              color: isClosed ? "#64748B" : "#EF4444",
+              border: `1px solid ${isClosed ? "rgba(100,116,139,0.2)" : "rgba(239,68,68,0.3)"}`,
+              cursor: isClosed ? "not-allowed" : "pointer",
+              opacity: isClosed ? 0.5 : 1,
+            }}
+          >
+            <XCircle className="w-3 h-3" />⛔ Mark SL Hit
+          </button>
+        </div>
+
         {/* Update result banner */}
         {updateResult && (
           <div
@@ -498,11 +640,13 @@ function TrackCard({
 }
 
 export function TrackingPage() {
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
   const storageKey = user ? `wb_tracked_${user.uid}` : "wb_tracked_guest";
 
   // Initialize empty; load from per-user key in effect
   const [tracked, setTracked] = useState<TrackedTrade[]>([]);
+  const [tradeHistory, setTradeHistory] = useState<TradeAnalysisEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Load tracked trades whenever the storage key changes (login/logout)
   useEffect(() => {
@@ -526,11 +670,134 @@ export function TrackingPage() {
     return () => clearInterval(id);
   }, []);
 
+  // Load trade analysis history
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is intentionally used as a trigger
+  useEffect(() => {
+    const uid = user?.uid ?? "guest";
+    try {
+      const data = JSON.parse(
+        localStorage.getItem(`wb_trade_analysis_${uid}`) ?? "[]",
+      );
+      setTradeHistory(data);
+    } catch {
+      setTradeHistory([]);
+    }
+  }, [user, refreshTick]);
+
   // Remove a tracked trade by ID
   const removeTrade = (id: string) => {
     const updated = tracked.filter((t) => t.id !== id);
     setTracked(updated);
     localStorage.setItem(storageKey, JSON.stringify(updated));
+  };
+
+  // Close trade as WIN
+  const closeTradeAsWin = (trade: TrackedTrade, livePrice: number) => {
+    const uid = user?.uid ?? "guest";
+    const analysis: TradeAnalysisEntry = {
+      id: `ta-${Date.now()}`,
+      symbol: trade.symbol,
+      coinName: trade.coinName,
+      direction: trade.direction,
+      entryPrice: trade.entryPrice,
+      closePrice: livePrice,
+      targetPrice: trade.targetPrice,
+      stopLoss: trade.stopLoss,
+      outcome: "win",
+      profitPercent: trade.profitPercent,
+      closedAt: new Date().toISOString(),
+      addedAt: trade.addedAt,
+      aiNote: `WIN: ${trade.coinName} hit take profit at $${trade.targetPrice.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. Profit: +${trade.profitPercent.toFixed(2)}%. Multi-TF confluence was ${
+        trade.multiTimeframeConfluence ? "active" : "partial"
+      }. RSI at entry: ${trade.rsiValue.toFixed(1)}. This pattern reinforces our ${trade.trend} trend + ${trade.direction} signal logic.`,
+    };
+    const logKey = `wb_trade_analysis_${uid}`;
+    const existing: TradeAnalysisEntry[] = JSON.parse(
+      localStorage.getItem(logKey) ?? "[]",
+    );
+    const updatedLog = [analysis, ...existing];
+    localStorage.setItem(logKey, JSON.stringify(updatedLog));
+    setTradeHistory(updatedLog);
+
+    const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
+    updateProfile({
+      tradeHistory: {
+        total: current.total + 1,
+        wins: current.wins + 1,
+        losses: current.losses,
+      },
+    });
+
+    const updated = tracked.map((t) =>
+      t.id === trade.id
+        ? { ...t, outcome: "win" as const, closedAt: new Date().toISOString() }
+        : t,
+    );
+    setTracked(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+    toast.success(`🎯 ${trade.coinName} marked as WIN! Trade history updated.`);
+  };
+
+  // Close trade as LOSS
+  const closeTradeAsLoss = (trade: TrackedTrade, livePrice: number) => {
+    const uid = user?.uid ?? "guest";
+    const analysis: TradeAnalysisEntry = {
+      id: `ta-${Date.now()}`,
+      symbol: trade.symbol,
+      coinName: trade.coinName,
+      direction: trade.direction,
+      entryPrice: trade.entryPrice,
+      closePrice: livePrice,
+      targetPrice: trade.targetPrice,
+      stopLoss: trade.stopLoss,
+      outcome: "loss",
+      profitPercent: -Math.abs(trade.profitPercent),
+      closedAt: new Date().toISOString(),
+      addedAt: trade.addedAt,
+      aiNote: `LOSS: ${trade.coinName} hit stop loss at $${trade.stopLoss.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. RSI at entry: ${trade.rsiValue.toFixed(1)}, Trend: ${trade.trend}. This trade is flagged for AI learning to improve signal filtering. Symbol added to SL blacklist.`,
+    };
+    const logKey = `wb_trade_analysis_${uid}`;
+    const existing: TradeAnalysisEntry[] = JSON.parse(
+      localStorage.getItem(logKey) ?? "[]",
+    );
+    const updatedLog = [analysis, ...existing];
+    localStorage.setItem(logKey, JSON.stringify(updatedLog));
+    setTradeHistory(updatedLog);
+
+    // Add symbol to global SL blacklist
+    const slHits: string[] = JSON.parse(
+      localStorage.getItem("wb_sl_hits") ?? "[]",
+    );
+    if (!slHits.includes(trade.symbol)) {
+      localStorage.setItem(
+        "wb_sl_hits",
+        JSON.stringify([...slHits, trade.symbol]),
+      );
+    }
+
+    const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
+    updateProfile({
+      tradeHistory: {
+        total: current.total + 1,
+        wins: current.wins,
+        losses: current.losses + 1,
+      },
+    });
+
+    const updated = tracked.map((t) =>
+      t.id === trade.id
+        ? {
+            ...t,
+            outcome: "loss" as const,
+            closedAt: new Date().toISOString(),
+          }
+        : t,
+    );
+    setTracked(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+    toast.error(
+      `⛔ ${trade.coinName} marked as LOSS. Symbol blacklisted from future signals.`,
+    );
   };
 
   // Update verdict states per trade
@@ -672,12 +939,256 @@ export function TrackingPage() {
                   isUpdating={updatingId === trade.id}
                   updateResult={updateResults[trade.id] ?? null}
                   onRemove={() => removeTrade(trade.id)}
+                  onCloseWin={() => closeTradeAsWin(trade, livePrice)}
+                  onCloseLoss={() => closeTradeAsLoss(trade, livePrice)}
                 />
               </div>
             );
           })}
         </div>
       )}
+
+      {/* Trade History & Deep Analysis Section */}
+      <div className="mt-8">
+        <button
+          type="button"
+          data-ocid="tracking.history.toggle"
+          onClick={() => setShowHistory((v) => !v)}
+          className="w-full flex items-center justify-between p-4 rounded-2xl transition-all"
+          style={{
+            background: "linear-gradient(135deg, #071428, #0B1F3B)",
+            border: "1px solid rgba(212,175,55,0.2)",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <Brain className="w-5 h-5 text-gold" />
+            <div className="text-left">
+              <p className="font-bold text-white text-sm">
+                Trade History &amp; Deep Analysis
+              </p>
+              <p className="text-gold/50 text-xs">
+                {tradeHistory.length} closed trades analyzed by AI
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="px-2 py-0.5 rounded-full text-xs font-bold"
+              style={{
+                background: "rgba(212,175,55,0.15)",
+                color: "#D4AF37",
+                border: "1px solid rgba(212,175,55,0.25)",
+              }}
+            >
+              {tradeHistory.filter((t) => t.outcome === "win").length}W /{" "}
+              {tradeHistory.filter((t) => t.outcome === "loss").length}L
+            </span>
+            {showHistory ? (
+              <ChevronUp className="w-4 h-4 text-gold" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-gold" />
+            )}
+          </div>
+        </button>
+
+        <AnimatePresence>
+          {showHistory && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 space-y-3" data-ocid="tracking.history.list">
+                {tradeHistory.length === 0 ? (
+                  <div
+                    className="flex flex-col items-center gap-3 py-10"
+                    data-ocid="tracking.history.empty_state"
+                  >
+                    <Brain className="w-10 h-10 text-gray-300" />
+                    <p className="text-gray-500 text-sm">
+                      No closed trades yet. Win/Loss history will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  tradeHistory.map((entry, i) => (
+                    <motion.div
+                      key={entry.id}
+                      data-ocid={`tracking.history.item.${i + 1}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="rounded-2xl p-4"
+                      style={{
+                        background: "linear-gradient(135deg, #0B1F3B, #0A254A)",
+                        border: `1px solid ${
+                          entry.outcome === "win"
+                            ? "rgba(34,197,94,0.35)"
+                            : "rgba(239,68,68,0.35)"
+                        }`,
+                        borderLeft: `4px solid ${
+                          entry.outcome === "win" ? "#22C55E" : "#EF4444"
+                        }`,
+                      }}
+                    >
+                      {/* Card header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-8 h-8 rounded-full flex items-center justify-center font-black text-navy text-xs"
+                            style={{
+                              background:
+                                "linear-gradient(135deg, #F2D27A, #D4AF37)",
+                            }}
+                          >
+                            {entry.symbol.slice(0, 2)}
+                          </div>
+                          <div>
+                            <p className="text-white font-bold text-sm">
+                              {entry.coinName}
+                            </p>
+                            <p className="text-white/40 text-xs">
+                              {entry.symbol}/USDT
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-bold"
+                            style={{
+                              background:
+                                entry.direction === "BUY"
+                                  ? "rgba(34,197,94,0.15)"
+                                  : "rgba(239,68,68,0.15)",
+                              color:
+                                entry.direction === "BUY"
+                                  ? "#22C55E"
+                                  : "#EF4444",
+                              border: `1px solid ${
+                                entry.direction === "BUY"
+                                  ? "rgba(34,197,94,0.3)"
+                                  : "rgba(239,68,68,0.3)"
+                              }`,
+                            }}
+                          >
+                            {entry.direction}
+                          </span>
+                          <span
+                            className="px-2.5 py-0.5 rounded-full text-xs font-black"
+                            style={{
+                              background:
+                                entry.outcome === "win"
+                                  ? "rgba(34,197,94,0.2)"
+                                  : "rgba(239,68,68,0.2)",
+                              color:
+                                entry.outcome === "win" ? "#22C55E" : "#EF4444",
+                              border: `1px solid ${
+                                entry.outcome === "win"
+                                  ? "rgba(34,197,94,0.4)"
+                                  : "rgba(239,68,68,0.4)"
+                              }`,
+                            }}
+                          >
+                            {entry.outcome === "win" ? "✅ WIN" : "❌ LOSS"}
+                          </span>
+                          {entry.outcome === "win" ? (
+                            <TrendingUp className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <TrendingDown className="w-4 h-4 text-red-400" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Price data */}
+                      <div className="grid grid-cols-3 gap-2 text-xs mb-3">
+                        <div
+                          className="rounded-lg p-2"
+                          style={{ background: "rgba(255,255,255,0.05)" }}
+                        >
+                          <p className="text-white/40 mb-0.5">Entry</p>
+                          <p className="font-bold text-white">
+                            $
+                            {entry.entryPrice.toLocaleString(undefined, {
+                              maximumFractionDigits: 4,
+                            })}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-lg p-2"
+                          style={{ background: "rgba(255,255,255,0.05)" }}
+                        >
+                          <p className="text-white/40 mb-0.5">Close</p>
+                          <p
+                            className="font-bold"
+                            style={{
+                              color:
+                                entry.outcome === "win" ? "#22C55E" : "#EF4444",
+                            }}
+                          >
+                            $
+                            {entry.closePrice.toLocaleString(undefined, {
+                              maximumFractionDigits: 4,
+                            })}
+                          </p>
+                        </div>
+                        <div
+                          className="rounded-lg p-2"
+                          style={{ background: "rgba(255,255,255,0.05)" }}
+                        >
+                          <p className="text-white/40 mb-0.5">P&amp;L</p>
+                          <p
+                            className="font-bold"
+                            style={{
+                              color:
+                                entry.outcome === "win" ? "#22C55E" : "#EF4444",
+                            }}
+                          >
+                            {entry.outcome === "win" ? "+" : ""}
+                            {entry.profitPercent.toFixed(2)}%
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* AI Note */}
+                      <div
+                        className="rounded-xl p-3 mb-2"
+                        style={{
+                          background: "rgba(0,0,0,0.3)",
+                          border: "1px solid rgba(212,175,55,0.15)",
+                        }}
+                      >
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Brain className="w-3.5 h-3.5 text-gold" />
+                          <span className="text-gold text-xs font-bold uppercase tracking-wide">
+                            AI Deep Analysis
+                          </span>
+                        </div>
+                        <p className="text-white/70 text-xs leading-relaxed">
+                          {entry.aiNote}
+                        </p>
+                      </div>
+
+                      {/* Date */}
+                      <p className="text-white/30 text-xs flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        Closed:{" "}
+                        {new Date(entry.closedAt).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
