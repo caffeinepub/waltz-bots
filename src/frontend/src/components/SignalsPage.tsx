@@ -7,11 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
-import {
-  type LiveSignal,
-  SCAN_SYMBOLS,
-  useSignalScan,
-} from "@/context/SignalScanContext";
+import { type LiveSignal, useSignalScan } from "@/context/SignalScanContext";
 import { analyzeSymbol, useLivePrices } from "@/hooks/useMarketData";
 import {
   Activity,
@@ -284,6 +280,30 @@ function SignalCard({
               Vol Spike ✓
             </span>
           )}
+          {signal.goldenCross && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(212,175,55,0.15)",
+                color: "#D4AF37",
+                border: "1px solid rgba(212,175,55,0.35)",
+              }}
+            >
+              Golden Cross ✓
+            </span>
+          )}
+          {signal.supportZone && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(34,197,94,0.12)",
+                color: "#4ADE80",
+                border: "1px solid rgba(74,222,128,0.35)",
+              }}
+            >
+              Support Zone ✓
+            </span>
+          )}
         </div>
 
         {/* Progress bar */}
@@ -400,6 +420,102 @@ function SignalCard({
   );
 }
 
+function WinRateTracker({ uid }: { uid: string }) {
+  const [stats, setStats] = useState({ wins: 0, losses: 0, total: 0 });
+
+  useEffect(() => {
+    const load = () => {
+      try {
+        const key = `wb_trade_analysis_${uid}`;
+        const raw = localStorage.getItem(key);
+        if (!raw) {
+          setStats({ wins: 0, losses: 0, total: 0 });
+          return;
+        }
+        const arr = JSON.parse(raw) as Array<{ outcome?: string }>;
+        const wins = arr.filter(
+          (t) => t.outcome === "WIN" || t.outcome === "TP_HIT",
+        ).length;
+        const losses = arr.filter(
+          (t) => t.outcome === "LOSS" || t.outcome === "SL_HIT",
+        ).length;
+        setStats({ wins, losses, total: arr.length });
+      } catch {
+        setStats({ wins: 0, losses: 0, total: 0 });
+      }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid]);
+  const winRate =
+    stats.total > 0 ? Math.round((stats.wins / stats.total) * 100) : null;
+  const rateColor =
+    winRate === null
+      ? "#94A3B8"
+      : winRate >= 70
+        ? "#22C55E"
+        : winRate >= 50
+          ? "#EAB308"
+          : "#EF4444";
+
+  return (
+    <div
+      className="rounded-xl p-3 flex items-center justify-between gap-4"
+      style={{
+        background: "rgba(11,31,59,0.85)",
+        border: "1px solid rgba(212,175,55,0.25)",
+      }}
+      data-ocid="signals.win_rate.card"
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-lg">📊</span>
+        <div>
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Platform Win Rate
+          </div>
+          {winRate === null ? (
+            <div className="text-xs text-gray-500 mt-0.5">
+              No trades yet — track a signal to start
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 mt-0.5">
+              <span
+                className="text-xl font-extrabold"
+                style={{ color: rateColor }}
+              >
+                {winRate}%
+              </span>
+              <span className="text-xs text-gray-400">
+                <span style={{ color: "#22C55E" }} className="font-bold">
+                  {stats.wins}W
+                </span>
+                {" / "}
+                <span style={{ color: "#EF4444" }} className="font-bold">
+                  {stats.losses}L
+                </span>
+                {" / "}
+                <span className="text-gray-300">{stats.total} Total</span>
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+      <div
+        className="text-xs font-bold px-2 py-0.5 rounded-full"
+        style={{
+          background: "rgba(212,175,55,0.15)",
+          color: "#F2D27A",
+          border: "1px solid rgba(212,175,55,0.3)",
+        }}
+      >
+        LIVE
+      </div>
+    </div>
+  );
+}
+
 type FilterType = "All" | "BUY" | "SELL" | "Hot";
 
 function getTrackedIds(key: string): Set<string> {
@@ -447,10 +563,12 @@ export function SignalsPage({
     rescan,
     scannedCount,
     totalSymbols,
+    preFilteredCount,
     countdown,
   } = useSignalScan();
 
-  const livePrices = useLivePrices(SCAN_SYMBOLS, 8000);
+  const signalSymbols = signals.map((s) => s.symbol);
+  const livePrices = useLivePrices(signalSymbols, 8000);
 
   const handleTest = async (signal: LiveSignal) => {
     // One-time only: if already tested and passed, do nothing
@@ -524,8 +642,10 @@ export function SignalsPage({
     }
   };
 
+  const EIGHT_HOURS = 8 * 60 * 60 * 1000;
   const filtered = signals.filter((s) => {
     if (droppedIds.has(s.id)) return false;
+    if (Date.now() - s.generatedAt > EIGHT_HOURS) return false;
     if (filter === "BUY") return s.direction === "BUY";
     if (filter === "SELL") return s.direction === "SELL";
     if (filter === "Hot") return s.confidence >= 70;
@@ -579,7 +699,7 @@ export function SignalsPage({
           >
             <Activity className="w-3 h-3 inline mr-1" />
             {scanning
-              ? `Scanning ${scannedCount}/${totalSymbols}...`
+              ? `Scanning ${scannedCount}/${totalSymbols} — ${preFilteredCount} passed pre-filter, analyzing...`
               : `${signals.length} Active`}
           </div>
         </div>
@@ -593,7 +713,9 @@ export function SignalsPage({
             Sorted by highest profit %
             {!scanning && countdown > 0 && (
               <span className="ml-2 text-gold font-semibold">
-                Next scan in {countdown}s
+                {countdown > 60
+                  ? `Next scan in ${Math.floor(countdown / 60)}m ${countdown % 60}s`
+                  : `Next scan in ${countdown}s`}
               </span>
             )}
           </p>
@@ -612,6 +734,9 @@ export function SignalsPage({
           )}
         </div>
       )}
+
+      {/* Win Rate Tracker */}
+      <WinRateTracker uid={user?.uid ?? "guest"} />
 
       {/* Filter tabs */}
       <div className="flex gap-2" data-ocid="signals.tab">
@@ -646,8 +771,9 @@ export function SignalsPage({
             Scanning and verifying signals...
           </p>
           <p className="text-gray-400 text-sm text-center">
-            Scanning {scannedCount} / {totalSymbols} symbols — RSI, MACD, EMA
-            multi-timeframe analysis
+            Scanning {scannedCount} / {totalSymbols} Binance pairs —
+            quick-filtering by volume &amp; momentum, then running full RSI,
+            MACD, EMA, Golden Cross, Support Zone analysis on top candidates
           </p>
           <p className="text-xs text-gray-400">
             Only signals that pass ALL verification checks will be shown

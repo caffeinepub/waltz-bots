@@ -295,6 +295,8 @@ export function SearchPage() {
           entryType: analysis.entryType,
           generatedAt: Date.now(),
           profitPercent: analysis.profitPercent,
+          goldenCross: analysis.goldenCross,
+          supportZone: analysis.supportZone,
         };
         setResults([sig]);
         setMsgs([

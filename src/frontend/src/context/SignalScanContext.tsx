@@ -1,7 +1,16 @@
 /**
- * SignalScanContext — persistent signal scan that survives page navigation.
- * Scans top 20 high-liquidity coins only.
- * Auto-rescans every 90 seconds. Countdown timer exposed for UI.
+ * SignalScanContext — scans ALL Binance USDT pairs in a single batch.
+ *
+ * PIPELINE:
+ * 1. Fetch ALL active USDT pairs from Binance exchangeInfo (~1800+ pairs)
+ * 2. Fetch ALL 24h tickers in ONE API call (no per-coin requests)
+ * 3. Pre-filter by volume (>$5M 24h) — typically cuts to ~200-400 candidates
+ * 4. Quick trend pre-filter per candidate (50 1h candles) — cuts to ~50-100
+ * 5. Full multi-layer analysis on pre-filtered coins only
+ * 6. Only coins passing ALL 15 accuracy gates appear as signals
+ *
+ * This gives breadth (all 1800+ coins checked) with speed (only ~50-100 get full analysis)
+ * and accuracy (15 hard gates + 82% confidence minimum).
  */
 import {
   createContext,
@@ -12,9 +21,12 @@ import {
   useState,
 } from "react";
 import {
+  type BinancePair,
   type SignalAnalysis,
   analyzeSymbol,
-  fetch24hTickers,
+  fetchAllBinanceUSDTPairs,
+  fetchAllTickers,
+  quickPreFilter,
 } from "../hooks/useMarketData";
 
 export interface LiveSignal {
@@ -43,56 +55,11 @@ export interface LiveSignal {
   entryType: string;
   generatedAt: number;
   profitPercent: number;
+  goldenCross: boolean;
+  supportZone: boolean;
 }
 
-// Top 20 high-liquidity coins ($50M+ 24h volume consistently)
-export const SCAN_SYMBOLS = [
-  "BTC",
-  "ETH",
-  "BNB",
-  "SOL",
-  "XRP",
-  "ADA",
-  "AVAX",
-  "DOT",
-  "MATIC",
-  "LINK",
-  "LTC",
-  "UNI",
-  "ATOM",
-  "NEAR",
-  "DOGE",
-  "SHIB",
-  "OP",
-  "ARB",
-  "INJ",
-  "SUI",
-];
-
-export const COIN_NAMES: Record<string, string> = {
-  BTC: "Bitcoin",
-  ETH: "Ethereum",
-  BNB: "BNB",
-  SOL: "Solana",
-  XRP: "Ripple",
-  ADA: "Cardano",
-  AVAX: "Avalanche",
-  DOT: "Polkadot",
-  MATIC: "Polygon",
-  LINK: "Chainlink",
-  LTC: "Litecoin",
-  UNI: "Uniswap",
-  ATOM: "Cosmos",
-  NEAR: "NEAR Protocol",
-  DOGE: "Dogecoin",
-  SHIB: "Shiba Inu",
-  OP: "Optimism",
-  ARB: "Arbitrum",
-  INJ: "Injective",
-  SUI: "Sui",
-};
-
-const RESCAN_INTERVAL = 90; // seconds
+const RESCAN_INTERVAL = 300; // 5 minutes (full 1800-coin scan takes time)
 
 interface SignalScanContextType {
   signals: LiveSignal[];
@@ -101,6 +68,7 @@ interface SignalScanContextType {
   lastUpdated: Date | null;
   scannedCount: number;
   totalSymbols: number;
+  preFilteredCount: number;
   countdown: number;
   rescan: () => void;
 }
@@ -111,7 +79,8 @@ const SignalScanContext = createContext<SignalScanContextType>({
   scanning: false,
   lastUpdated: null,
   scannedCount: 0,
-  totalSymbols: SCAN_SYMBOLS.length,
+  totalSymbols: 0,
+  preFilteredCount: 0,
   countdown: RESCAN_INTERVAL,
   rescan: () => {},
 });
@@ -124,12 +93,11 @@ export function SignalScanProvider({
   const [scanning, setScanning] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scannedCount, setScannedCount] = useState(0);
+  const [totalSymbols, setTotalSymbols] = useState(0);
+  const [preFilteredCount, setPreFilteredCount] = useState(0);
   const [countdown, setCountdown] = useState(RESCAN_INTERVAL);
-  const totalSymbols = SCAN_SYMBOLS.length;
 
-  // Prevent concurrent scans
   const scanRef = useRef(false);
-  // Ensure first scan only runs once even in StrictMode double-invoke
   const hasRunRef = useRef(false);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -153,46 +121,74 @@ export function SignalScanProvider({
     setScanning(true);
     setSignals([]);
     setScannedCount(0);
+    setPreFilteredCount(0);
 
     try {
-      // Pre-filter: only include coins with sufficient 24h volume ($50M+)
-      const tickers = await fetch24hTickers(SCAN_SYMBOLS);
-      if (tickers.length === 0) {
-        setLoading(false);
-        setScanning(false);
-        scanRef.current = false;
-        return;
+      // STEP 1: Fetch all USDT pairs from Binance
+      const allPairs: BinancePair[] = await fetchAllBinanceUSDTPairs();
+      setTotalSymbols(allPairs.length);
+
+      // STEP 2: Fetch ALL 24h tickers in ONE call
+      const allTickers = await fetchAllTickers();
+      const priceMap: Record<string, number> = {};
+      const volumeMap: Record<string, number> = {};
+      for (const t of allTickers) {
+        priceMap[t.symbol] = t.price;
+        volumeMap[t.symbol] = t.volume24h;
       }
 
-      const priceMap = Object.fromEntries(
-        tickers.map((t) => [t.symbol, t.price]),
-      );
-      const volumeMap = Object.fromEntries(
-        tickers.map((t) => [t.symbol, t.volume24h]),
-      );
+      // STEP 3: Volume pre-filter — keep only $5M+ 24h volume
+      const volumeFiltered = allPairs.filter((pair) => {
+        const vol = volumeMap[pair.baseAsset] ?? 0;
+        const price = priceMap[pair.baseAsset] ?? 0;
+        return vol >= 5_000_000 && price > 0;
+      });
 
-      for (const symbol of SCAN_SYMBOLS) {
-        const price = priceMap[symbol];
-        const volume24h = volumeMap[symbol] ?? 0;
+      // STEP 4: Quick trend pre-filter (parallel batches to stay within rate limits)
+      // Process in batches of 10 with 300ms between batches
+      const preFilterPassed: BinancePair[] = [];
+      const BATCH_SIZE = 10;
+      const BATCH_DELAY = 300; // ms between batches
 
-        // Skip coins with insufficient liquidity
-        if (!price || volume24h < 50_000_000) {
-          setScannedCount((prev) => prev + 1);
-          await new Promise((r) => setTimeout(r, 50));
-          continue;
+      for (let i = 0; i < volumeFiltered.length; i += BATCH_SIZE) {
+        const batch = volumeFiltered.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map(async (pair) => {
+            const price = priceMap[pair.baseAsset] ?? 0;
+            const vol = volumeMap[pair.baseAsset] ?? 0;
+            const passes = await quickPreFilter(pair.baseAsset, price, vol);
+            return { pair, passes };
+          }),
+        );
+        for (const r of results) {
+          if (r.passes) preFilterPassed.push(r.pair);
         }
+        // Update progress
+        setScannedCount(Math.min(i + BATCH_SIZE, volumeFiltered.length));
+        if (i + BATCH_SIZE < volumeFiltered.length) {
+          await new Promise((r) => setTimeout(r, BATCH_DELAY));
+        }
+      }
+
+      setPreFilteredCount(preFilterPassed.length);
+
+      // STEP 5: Full analysis on pre-filtered coins (stream results as found)
+      // Process sequentially with delay to respect Binance rate limits
+      for (const pair of preFilterPassed) {
+        const price = priceMap[pair.baseAsset] ?? 0;
+        if (!price) continue;
 
         try {
           const analysis: SignalAnalysis | null = await analyzeSymbol(
-            symbol,
+            pair.baseAsset,
             price,
           );
           if (analysis) {
-            const newSignal: LiveSignal = {
-              id: `${symbol}-${Date.now()}`,
-              symbol,
-              coinName: COIN_NAMES[symbol] ?? symbol,
-              direction: analysis.direction as "BUY" | "SELL",
+            const signal: LiveSignal = {
+              id: `${pair.baseAsset}-${Date.now()}`,
+              symbol: pair.baseAsset,
+              coinName: pair.baseAsset,
+              direction: "BUY",
               entryPrice: analysis.entryPrice,
               targetPrice: analysis.targetPrice,
               stopLoss: analysis.stopLoss,
@@ -214,18 +210,20 @@ export function SignalScanProvider({
               entryType: analysis.entryType,
               generatedAt: Date.now(),
               profitPercent: analysis.profitPercent,
+              goldenCross: analysis.goldenCross,
+              supportZone: analysis.supportZone,
             };
+            // Stream: add signal immediately, sorted by confidence descending
             setSignals((prev) =>
-              [...prev, newSignal].sort(
-                (a, b) => b.profitPercent - a.profitPercent,
-              ),
+              [...prev, signal].sort((a, b) => b.confidence - a.confidence),
             );
           }
         } catch {
-          // Skip failed symbols silently
+          // Skip failed analysis silently
         }
-        setScannedCount((prev) => prev + 1);
-        await new Promise((r) => setTimeout(r, 150));
+
+        // 200ms between full analyses to stay under rate limits
+        await new Promise((r) => setTimeout(r, 200));
       }
 
       setLastUpdated(new Date());
@@ -237,24 +235,22 @@ export function SignalScanProvider({
     }
   }, [startCountdown]);
 
-  // Run ONCE on mount
+  // Run once on mount
   useEffect(() => {
     if (hasRunRef.current) return;
     hasRunRef.current = true;
     runScan();
   }, [runScan]);
 
-  // Auto-rescan every 90 seconds
+  // Auto-rescan every 5 minutes
   useEffect(() => {
     const id = setInterval(() => {
-      if (!scanRef.current) {
-        runScan();
-      }
+      if (!scanRef.current) runScan();
     }, RESCAN_INTERVAL * 1000);
     return () => clearInterval(id);
   }, [runScan]);
 
-  // Cleanup countdown on unmount
+  // Cleanup
   useEffect(() => {
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
@@ -275,6 +271,7 @@ export function SignalScanProvider({
         lastUpdated,
         scannedCount,
         totalSymbols,
+        preFilteredCount,
         countdown,
         rescan,
       }}
@@ -287,3 +284,7 @@ export function SignalScanProvider({
 export function useSignalScan(): SignalScanContextType {
   return useContext(SignalScanContext);
 }
+
+// Legacy export kept for compatibility (dynamic scan uses all pairs now)
+export const SCAN_SYMBOLS: string[] = [];
+export const COIN_NAMES: Record<string, string> = {};
