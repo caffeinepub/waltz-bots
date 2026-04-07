@@ -62,6 +62,19 @@ export const UserRole = IDL.Variant({
   'user' : IDL.Null,
   'guest' : IDL.Null,
 });
+export const TrackedTradeRecord = IDL.Record({
+  'uid' : IDL.Text,
+  'tradeJson' : IDL.Text,
+  'updatedAt' : Time,
+  'tradeId' : IDL.Text,
+});
+export const UserCredential = IDL.Record({
+  'uid' : IDL.Text,
+  'username' : IDL.Text,
+  'createdAt' : Time,
+  'subscriptionType' : IDL.Text,
+  'passwordHash' : IDL.Text,
+});
 export const UserProfile = IDL.Record({
   'status' : SubscriptionStatus,
   'username' : IDL.Text,
@@ -77,12 +90,6 @@ export const MarketStatus = IDL.Record({
   'marketCap' : IDL.Float64,
   'sentiment' : MarketSentiment,
 });
-export const ScanReport = IDL.Record({
-  'totalSignalsGenerated' : IDL.Nat,
-  'activeSignalsCount' : IDL.Nat,
-  'winRate' : IDL.Float64,
-  'totalCoinsScanned' : IDL.Nat,
-});
 
 export const idlService = IDL.Service({
   '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
@@ -91,63 +98,48 @@ export const idlService = IDL.Service({
   'addTradingSignal' : IDL.Func([TradingSignal], [], []),
   'addTrendingCoin' : IDL.Func([TrendingCoin], [], []),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+  'deleteTrackedTrade' : IDL.Func([IDL.Text], [], []),
+  'deleteUserCredential' : IDL.Func([IDL.Text], [], []),
   'getAllAppUserProfiles' : IDL.Func([], [IDL.Vec(AppUserProfile)], ['query']),
   'getAllNewsPosts' : IDL.Func([], [IDL.Vec(NewsPost)], ['query']),
+  'getAllTrackedTrades' : IDL.Func(
+      [],
+      [IDL.Vec(TrackedTradeRecord)],
+      ['query'],
+    ),
   'getAllTradingSignals' : IDL.Func([], [IDL.Vec(TradingSignal)], ['query']),
   'getAllTrendingCoins' : IDL.Func([], [IDL.Vec(TrendingCoin)], ['query']),
+  'getAllUserCredentials' : IDL.Func([], [IDL.Vec(UserCredential)], ['query']),
   'getAppUserProfile' : IDL.Func(
       [IDL.Text],
       [IDL.Opt(AppUserProfile)],
-      ['query'],
-    ),
-  'getAppUserProfilesByStatus' : IDL.Func(
-      [SubscriptionStatus],
-      [IDL.Vec(AppUserProfile)],
-      ['query'],
-    ),
-  'getAppUserProfilesBySubscriptionExpiry' : IDL.Func(
-      [],
-      [IDL.Vec(AppUserProfile)],
       ['query'],
     ),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getMarketStatus' : IDL.Func([], [MarketStatus], ['query']),
   'getNewsPost' : IDL.Func([IDL.Text], [IDL.Opt(NewsPost)], ['query']),
-  'getNewsPostsByCategory' : IDL.Func(
-      [PostCategory],
-      [IDL.Vec(NewsPost)],
+  'getTrackedTradesForUser' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(TrackedTradeRecord)],
       ['query'],
     ),
-  'getNewsPostsByTimestamp' : IDL.Func([], [IDL.Vec(NewsPost)], ['query']),
-  'getScanReport' : IDL.Func([], [ScanReport], ['query']),
   'getTradingSignal' : IDL.Func(
       [IDL.Text],
       [IDL.Opt(TradingSignal)],
       ['query'],
     ),
-  'getTradingSignalsByCoinName' : IDL.Func(
-      [],
-      [IDL.Vec(TradingSignal)],
-      ['query'],
-    ),
-  'getTradingSignalsByStatus' : IDL.Func(
-      [SignalStatus],
-      [IDL.Vec(TradingSignal)],
-      ['query'],
-    ),
-  'getTradingSignalsByTimestamp' : IDL.Func(
-      [],
-      [IDL.Vec(TradingSignal)],
-      ['query'],
-    ),
   'getTrendingCoin' : IDL.Func([IDL.Text], [IDL.Opt(TrendingCoin)], ['query']),
-  'getTrendingCoinsByCategory' : IDL.Func(
-      [CoinCategory],
-      [IDL.Vec(TrendingCoin)],
+  'getUserCredentialByUid' : IDL.Func(
+      [IDL.Text],
+      [IDL.Opt(UserCredential)],
       ['query'],
     ),
-  'getTrendingCoinsByPrice' : IDL.Func([], [IDL.Vec(TrendingCoin)], ['query']),
+  'getUserCredentialByUsername' : IDL.Func(
+      [IDL.Text],
+      [IDL.Opt(UserCredential)],
+      ['query'],
+    ),
   'getUserProfile' : IDL.Func(
       [IDL.Principal],
       [IDL.Opt(UserProfile)],
@@ -155,6 +147,8 @@ export const idlService = IDL.Service({
     ),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'saveTrackedTrade' : IDL.Func([TrackedTradeRecord], [], []),
+  'saveUserCredential' : IDL.Func([UserCredential], [], []),
   'updateMarketStatus' : IDL.Func([MarketStatus], [], []),
 });
 
@@ -212,6 +206,19 @@ export const idlFactory = ({ IDL }) => {
     'user' : IDL.Null,
     'guest' : IDL.Null,
   });
+  const TrackedTradeRecord = IDL.Record({
+    'uid' : IDL.Text,
+    'tradeJson' : IDL.Text,
+    'updatedAt' : Time,
+    'tradeId' : IDL.Text,
+  });
+  const UserCredential = IDL.Record({
+    'uid' : IDL.Text,
+    'username' : IDL.Text,
+    'createdAt' : Time,
+    'subscriptionType' : IDL.Text,
+    'passwordHash' : IDL.Text,
+  });
   const UserProfile = IDL.Record({
     'status' : SubscriptionStatus,
     'username' : IDL.Text,
@@ -227,12 +234,6 @@ export const idlFactory = ({ IDL }) => {
     'marketCap' : IDL.Float64,
     'sentiment' : MarketSentiment,
   });
-  const ScanReport = IDL.Record({
-    'totalSignalsGenerated' : IDL.Nat,
-    'activeSignalsCount' : IDL.Nat,
-    'winRate' : IDL.Float64,
-    'totalCoinsScanned' : IDL.Nat,
-  });
   
   return IDL.Service({
     '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
@@ -241,58 +242,43 @@ export const idlFactory = ({ IDL }) => {
     'addTradingSignal' : IDL.Func([TradingSignal], [], []),
     'addTrendingCoin' : IDL.Func([TrendingCoin], [], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'deleteTrackedTrade' : IDL.Func([IDL.Text], [], []),
+    'deleteUserCredential' : IDL.Func([IDL.Text], [], []),
     'getAllAppUserProfiles' : IDL.Func(
         [],
         [IDL.Vec(AppUserProfile)],
         ['query'],
       ),
     'getAllNewsPosts' : IDL.Func([], [IDL.Vec(NewsPost)], ['query']),
+    'getAllTrackedTrades' : IDL.Func(
+        [],
+        [IDL.Vec(TrackedTradeRecord)],
+        ['query'],
+      ),
     'getAllTradingSignals' : IDL.Func([], [IDL.Vec(TradingSignal)], ['query']),
     'getAllTrendingCoins' : IDL.Func([], [IDL.Vec(TrendingCoin)], ['query']),
+    'getAllUserCredentials' : IDL.Func(
+        [],
+        [IDL.Vec(UserCredential)],
+        ['query'],
+      ),
     'getAppUserProfile' : IDL.Func(
         [IDL.Text],
         [IDL.Opt(AppUserProfile)],
-        ['query'],
-      ),
-    'getAppUserProfilesByStatus' : IDL.Func(
-        [SubscriptionStatus],
-        [IDL.Vec(AppUserProfile)],
-        ['query'],
-      ),
-    'getAppUserProfilesBySubscriptionExpiry' : IDL.Func(
-        [],
-        [IDL.Vec(AppUserProfile)],
         ['query'],
       ),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getMarketStatus' : IDL.Func([], [MarketStatus], ['query']),
     'getNewsPost' : IDL.Func([IDL.Text], [IDL.Opt(NewsPost)], ['query']),
-    'getNewsPostsByCategory' : IDL.Func(
-        [PostCategory],
-        [IDL.Vec(NewsPost)],
+    'getTrackedTradesForUser' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(TrackedTradeRecord)],
         ['query'],
       ),
-    'getNewsPostsByTimestamp' : IDL.Func([], [IDL.Vec(NewsPost)], ['query']),
-    'getScanReport' : IDL.Func([], [ScanReport], ['query']),
     'getTradingSignal' : IDL.Func(
         [IDL.Text],
         [IDL.Opt(TradingSignal)],
-        ['query'],
-      ),
-    'getTradingSignalsByCoinName' : IDL.Func(
-        [],
-        [IDL.Vec(TradingSignal)],
-        ['query'],
-      ),
-    'getTradingSignalsByStatus' : IDL.Func(
-        [SignalStatus],
-        [IDL.Vec(TradingSignal)],
-        ['query'],
-      ),
-    'getTradingSignalsByTimestamp' : IDL.Func(
-        [],
-        [IDL.Vec(TradingSignal)],
         ['query'],
       ),
     'getTrendingCoin' : IDL.Func(
@@ -300,14 +286,14 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Opt(TrendingCoin)],
         ['query'],
       ),
-    'getTrendingCoinsByCategory' : IDL.Func(
-        [CoinCategory],
-        [IDL.Vec(TrendingCoin)],
+    'getUserCredentialByUid' : IDL.Func(
+        [IDL.Text],
+        [IDL.Opt(UserCredential)],
         ['query'],
       ),
-    'getTrendingCoinsByPrice' : IDL.Func(
-        [],
-        [IDL.Vec(TrendingCoin)],
+    'getUserCredentialByUsername' : IDL.Func(
+        [IDL.Text],
+        [IDL.Opt(UserCredential)],
         ['query'],
       ),
     'getUserProfile' : IDL.Func(
@@ -317,6 +303,8 @@ export const idlFactory = ({ IDL }) => {
       ),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'saveTrackedTrade' : IDL.Func([TrackedTradeRecord], [], []),
+    'saveUserCredential' : IDL.Func([UserCredential], [], []),
     'updateMarketStatus' : IDL.Func([MarketStatus], [], []),
   });
 };

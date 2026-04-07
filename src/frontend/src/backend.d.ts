@@ -7,6 +7,13 @@ export interface None {
     __kind__: "None";
 }
 export type Option<T> = Some<T> | None;
+export interface UserCredential {
+    uid: string;
+    username: string;
+    createdAt: Time;
+    subscriptionType: string;
+    passwordHash: string;
+}
 export interface TrendingCoin {
     currentPrice: number;
     change24h: number;
@@ -16,12 +23,6 @@ export interface TrendingCoin {
     symbol: string;
 }
 export type Time = bigint;
-export interface ScanReport {
-    totalSignalsGenerated: bigint;
-    activeSignalsCount: bigint;
-    winRate: number;
-    totalCoinsScanned: bigint;
-}
 export interface AppUserProfile {
     uid: string;
     status: SubscriptionStatus;
@@ -47,6 +48,12 @@ export interface TradingSignal {
     coinName: string;
     entryPrice: number;
     signalStatus: SignalStatus;
+}
+export interface TrackedTradeRecord {
+    uid: string;
+    tradeJson: string;
+    updatedAt: Time;
+    tradeId: string;
 }
 export interface UserProfile {
     status: SubscriptionStatus;
@@ -91,29 +98,28 @@ export interface backendInterface {
     addTradingSignal(signal: TradingSignal): Promise<void>;
     addTrendingCoin(coin: TrendingCoin): Promise<void>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    deleteTrackedTrade(tradeId: string): Promise<void>;
+    deleteUserCredential(uid: string): Promise<void>;
     getAllAppUserProfiles(): Promise<Array<AppUserProfile>>;
     getAllNewsPosts(): Promise<Array<NewsPost>>;
+    getAllTrackedTrades(): Promise<Array<TrackedTradeRecord>>;
     getAllTradingSignals(): Promise<Array<TradingSignal>>;
     getAllTrendingCoins(): Promise<Array<TrendingCoin>>;
+    getAllUserCredentials(): Promise<Array<UserCredential>>;
     getAppUserProfile(uid: string): Promise<AppUserProfile | null>;
-    getAppUserProfilesByStatus(status: SubscriptionStatus): Promise<Array<AppUserProfile>>;
-    getAppUserProfilesBySubscriptionExpiry(): Promise<Array<AppUserProfile>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getMarketStatus(): Promise<MarketStatus>;
     getNewsPost(title: string): Promise<NewsPost | null>;
-    getNewsPostsByCategory(category: PostCategory): Promise<Array<NewsPost>>;
-    getNewsPostsByTimestamp(): Promise<Array<NewsPost>>;
-    getScanReport(): Promise<ScanReport>;
+    getTrackedTradesForUser(uid: string): Promise<Array<TrackedTradeRecord>>;
     getTradingSignal(coinName: string): Promise<TradingSignal | null>;
-    getTradingSignalsByCoinName(): Promise<Array<TradingSignal>>;
-    getTradingSignalsByStatus(status: SignalStatus): Promise<Array<TradingSignal>>;
-    getTradingSignalsByTimestamp(): Promise<Array<TradingSignal>>;
     getTrendingCoin(name: string): Promise<TrendingCoin | null>;
-    getTrendingCoinsByCategory(category: CoinCategory): Promise<Array<TrendingCoin>>;
-    getTrendingCoinsByPrice(): Promise<Array<TrendingCoin>>;
+    getUserCredentialByUid(uid: string): Promise<UserCredential | null>;
+    getUserCredentialByUsername(username: string): Promise<UserCredential | null>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    saveTrackedTrade(record: TrackedTradeRecord): Promise<void>;
+    saveUserCredential(cred: UserCredential): Promise<void>;
     updateMarketStatus(status: MarketStatus): Promise<void>;
 }

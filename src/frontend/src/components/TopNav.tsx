@@ -101,7 +101,7 @@ export function TopNav({ activeTab, onTabChange, onMenuOpen }: TopNavProps) {
     setLoginError("");
     setLoggingIn(true);
     await new Promise((r) => setTimeout(r, 400));
-    const result = login(username, password);
+    const result = await login(username, password);
     setLoggingIn(false);
     if (result.success) {
       setShowLogin(false);

@@ -89,6 +89,13 @@ export class ExternalBlob {
         return this;
     }
 }
+export interface UserCredential {
+    uid: string;
+    username: string;
+    createdAt: Time;
+    subscriptionType: string;
+    passwordHash: string;
+}
 export interface TrendingCoin {
     currentPrice: number;
     change24h: number;
@@ -98,12 +105,6 @@ export interface TrendingCoin {
     symbol: string;
 }
 export type Time = bigint;
-export interface ScanReport {
-    totalSignalsGenerated: bigint;
-    activeSignalsCount: bigint;
-    winRate: number;
-    totalCoinsScanned: bigint;
-}
 export interface AppUserProfile {
     uid: string;
     status: SubscriptionStatus;
@@ -129,6 +130,12 @@ export interface TradingSignal {
     coinName: string;
     entryPrice: number;
     signalStatus: SignalStatus;
+}
+export interface TrackedTradeRecord {
+    uid: string;
+    tradeJson: string;
+    updatedAt: Time;
+    tradeId: string;
 }
 export interface UserProfile {
     status: SubscriptionStatus;
@@ -174,33 +181,32 @@ export interface backendInterface {
     addTradingSignal(signal: TradingSignal): Promise<void>;
     addTrendingCoin(coin: TrendingCoin): Promise<void>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
+    deleteTrackedTrade(tradeId: string): Promise<void>;
+    deleteUserCredential(uid: string): Promise<void>;
     getAllAppUserProfiles(): Promise<Array<AppUserProfile>>;
     getAllNewsPosts(): Promise<Array<NewsPost>>;
+    getAllTrackedTrades(): Promise<Array<TrackedTradeRecord>>;
     getAllTradingSignals(): Promise<Array<TradingSignal>>;
     getAllTrendingCoins(): Promise<Array<TrendingCoin>>;
+    getAllUserCredentials(): Promise<Array<UserCredential>>;
     getAppUserProfile(uid: string): Promise<AppUserProfile | null>;
-    getAppUserProfilesByStatus(status: SubscriptionStatus): Promise<Array<AppUserProfile>>;
-    getAppUserProfilesBySubscriptionExpiry(): Promise<Array<AppUserProfile>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getMarketStatus(): Promise<MarketStatus>;
     getNewsPost(title: string): Promise<NewsPost | null>;
-    getNewsPostsByCategory(category: PostCategory): Promise<Array<NewsPost>>;
-    getNewsPostsByTimestamp(): Promise<Array<NewsPost>>;
-    getScanReport(): Promise<ScanReport>;
+    getTrackedTradesForUser(uid: string): Promise<Array<TrackedTradeRecord>>;
     getTradingSignal(coinName: string): Promise<TradingSignal | null>;
-    getTradingSignalsByCoinName(): Promise<Array<TradingSignal>>;
-    getTradingSignalsByStatus(status: SignalStatus): Promise<Array<TradingSignal>>;
-    getTradingSignalsByTimestamp(): Promise<Array<TradingSignal>>;
     getTrendingCoin(name: string): Promise<TrendingCoin | null>;
-    getTrendingCoinsByCategory(category: CoinCategory): Promise<Array<TrendingCoin>>;
-    getTrendingCoinsByPrice(): Promise<Array<TrendingCoin>>;
+    getUserCredentialByUid(uid: string): Promise<UserCredential | null>;
+    getUserCredentialByUsername(username: string): Promise<UserCredential | null>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     isCallerAdmin(): Promise<boolean>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    saveTrackedTrade(record: TrackedTradeRecord): Promise<void>;
+    saveUserCredential(cred: UserCredential): Promise<void>;
     updateMarketStatus(status: MarketStatus): Promise<void>;
 }
-import type { AppUserProfile as _AppUserProfile, CoinCategory as _CoinCategory, Direction as _Direction, MarketSentiment as _MarketSentiment, MarketStatus as _MarketStatus, NewsPost as _NewsPost, PostCategory as _PostCategory, SignalStatus as _SignalStatus, SubscriptionStatus as _SubscriptionStatus, Time as _Time, TradingSignal as _TradingSignal, TrendingCoin as _TrendingCoin, UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
+import type { AppUserProfile as _AppUserProfile, CoinCategory as _CoinCategory, Direction as _Direction, MarketSentiment as _MarketSentiment, MarketStatus as _MarketStatus, NewsPost as _NewsPost, PostCategory as _PostCategory, SignalStatus as _SignalStatus, SubscriptionStatus as _SubscriptionStatus, Time as _Time, TradingSignal as _TradingSignal, TrendingCoin as _TrendingCoin, UserCredential as _UserCredential, UserProfile as _UserProfile, UserRole as _UserRole } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
     async _initializeAccessControlWithSecret(arg0: string): Promise<void> {
@@ -287,6 +293,34 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async deleteTrackedTrade(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteTrackedTrade(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteTrackedTrade(arg0);
+            return result;
+        }
+    }
+    async deleteUserCredential(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteUserCredential(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteUserCredential(arg0);
+            return result;
+        }
+    }
     async getAllAppUserProfiles(): Promise<Array<AppUserProfile>> {
         if (this.processError) {
             try {
@@ -313,6 +347,20 @@ export class Backend implements backendInterface {
         } else {
             const result = await this.actor.getAllNewsPosts();
             return from_candid_vec_n26(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getAllTrackedTrades(): Promise<Array<TrackedTradeRecord>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAllTrackedTrades();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getAllTrackedTrades();
+            return result;
         }
     }
     async getAllTradingSignals(): Promise<Array<TradingSignal>> {
@@ -343,6 +391,20 @@ export class Backend implements backendInterface {
             return from_candid_vec_n38(this._uploadFile, this._downloadFile, result);
         }
     }
+    async getAllUserCredentials(): Promise<Array<UserCredential>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAllUserCredentials();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getAllUserCredentials();
+            return result;
+        }
+    }
     async getAppUserProfile(arg0: string): Promise<AppUserProfile | null> {
         if (this.processError) {
             try {
@@ -355,34 +417,6 @@ export class Backend implements backendInterface {
         } else {
             const result = await this.actor.getAppUserProfile(arg0);
             return from_candid_opt_n43(this._uploadFile, this._downloadFile, result);
-        }
-    }
-    async getAppUserProfilesByStatus(arg0: SubscriptionStatus): Promise<Array<AppUserProfile>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getAppUserProfilesByStatus(to_candid_SubscriptionStatus_n3(this._uploadFile, this._downloadFile, arg0));
-                return from_candid_vec_n21(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getAppUserProfilesByStatus(to_candid_SubscriptionStatus_n3(this._uploadFile, this._downloadFile, arg0));
-            return from_candid_vec_n21(this._uploadFile, this._downloadFile, result);
-        }
-    }
-    async getAppUserProfilesBySubscriptionExpiry(): Promise<Array<AppUserProfile>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getAppUserProfilesBySubscriptionExpiry();
-                return from_candid_vec_n21(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getAppUserProfilesBySubscriptionExpiry();
-            return from_candid_vec_n21(this._uploadFile, this._downloadFile, result);
         }
     }
     async getCallerUserProfile(): Promise<UserProfile | null> {
@@ -441,45 +475,17 @@ export class Backend implements backendInterface {
             return from_candid_opt_n53(this._uploadFile, this._downloadFile, result);
         }
     }
-    async getNewsPostsByCategory(arg0: PostCategory): Promise<Array<NewsPost>> {
+    async getTrackedTradesForUser(arg0: string): Promise<Array<TrackedTradeRecord>> {
         if (this.processError) {
             try {
-                const result = await this.actor.getNewsPostsByCategory(to_candid_PostCategory_n7(this._uploadFile, this._downloadFile, arg0));
-                return from_candid_vec_n26(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getNewsPostsByCategory(to_candid_PostCategory_n7(this._uploadFile, this._downloadFile, arg0));
-            return from_candid_vec_n26(this._uploadFile, this._downloadFile, result);
-        }
-    }
-    async getNewsPostsByTimestamp(): Promise<Array<NewsPost>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getNewsPostsByTimestamp();
-                return from_candid_vec_n26(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getNewsPostsByTimestamp();
-            return from_candid_vec_n26(this._uploadFile, this._downloadFile, result);
-        }
-    }
-    async getScanReport(): Promise<ScanReport> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getScanReport();
+                const result = await this.actor.getTrackedTradesForUser(arg0);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getScanReport();
+            const result = await this.actor.getTrackedTradesForUser(arg0);
             return result;
         }
     }
@@ -497,48 +503,6 @@ export class Backend implements backendInterface {
             return from_candid_opt_n54(this._uploadFile, this._downloadFile, result);
         }
     }
-    async getTradingSignalsByCoinName(): Promise<Array<TradingSignal>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getTradingSignalsByCoinName();
-                return from_candid_vec_n31(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getTradingSignalsByCoinName();
-            return from_candid_vec_n31(this._uploadFile, this._downloadFile, result);
-        }
-    }
-    async getTradingSignalsByStatus(arg0: SignalStatus): Promise<Array<TradingSignal>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getTradingSignalsByStatus(to_candid_SignalStatus_n13(this._uploadFile, this._downloadFile, arg0));
-                return from_candid_vec_n31(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getTradingSignalsByStatus(to_candid_SignalStatus_n13(this._uploadFile, this._downloadFile, arg0));
-            return from_candid_vec_n31(this._uploadFile, this._downloadFile, result);
-        }
-    }
-    async getTradingSignalsByTimestamp(): Promise<Array<TradingSignal>> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.getTradingSignalsByTimestamp();
-                return from_candid_vec_n31(this._uploadFile, this._downloadFile, result);
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.getTradingSignalsByTimestamp();
-            return from_candid_vec_n31(this._uploadFile, this._downloadFile, result);
-        }
-    }
     async getTrendingCoin(arg0: string): Promise<TrendingCoin | null> {
         if (this.processError) {
             try {
@@ -553,32 +517,32 @@ export class Backend implements backendInterface {
             return from_candid_opt_n55(this._uploadFile, this._downloadFile, result);
         }
     }
-    async getTrendingCoinsByCategory(arg0: CoinCategory): Promise<Array<TrendingCoin>> {
+    async getUserCredentialByUid(arg0: string): Promise<UserCredential | null> {
         if (this.processError) {
             try {
-                const result = await this.actor.getTrendingCoinsByCategory(to_candid_CoinCategory_n17(this._uploadFile, this._downloadFile, arg0));
-                return from_candid_vec_n38(this._uploadFile, this._downloadFile, result);
+                const result = await this.actor.getUserCredentialByUid(arg0);
+                return from_candid_opt_n56(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getTrendingCoinsByCategory(to_candid_CoinCategory_n17(this._uploadFile, this._downloadFile, arg0));
-            return from_candid_vec_n38(this._uploadFile, this._downloadFile, result);
+            const result = await this.actor.getUserCredentialByUid(arg0);
+            return from_candid_opt_n56(this._uploadFile, this._downloadFile, result);
         }
     }
-    async getTrendingCoinsByPrice(): Promise<Array<TrendingCoin>> {
+    async getUserCredentialByUsername(arg0: string): Promise<UserCredential | null> {
         if (this.processError) {
             try {
-                const result = await this.actor.getTrendingCoinsByPrice();
-                return from_candid_vec_n38(this._uploadFile, this._downloadFile, result);
+                const result = await this.actor.getUserCredentialByUsername(arg0);
+                return from_candid_opt_n56(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getTrendingCoinsByPrice();
-            return from_candid_vec_n38(this._uploadFile, this._downloadFile, result);
+            const result = await this.actor.getUserCredentialByUsername(arg0);
+            return from_candid_opt_n56(this._uploadFile, this._downloadFile, result);
         }
     }
     async getUserProfile(arg0: Principal): Promise<UserProfile | null> {
@@ -612,28 +576,56 @@ export class Backend implements backendInterface {
     async saveCallerUserProfile(arg0: UserProfile): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.saveCallerUserProfile(to_candid_UserProfile_n56(this._uploadFile, this._downloadFile, arg0));
+                const result = await this.actor.saveCallerUserProfile(to_candid_UserProfile_n57(this._uploadFile, this._downloadFile, arg0));
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.saveCallerUserProfile(to_candid_UserProfile_n56(this._uploadFile, this._downloadFile, arg0));
+            const result = await this.actor.saveCallerUserProfile(to_candid_UserProfile_n57(this._uploadFile, this._downloadFile, arg0));
+            return result;
+        }
+    }
+    async saveTrackedTrade(arg0: TrackedTradeRecord): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.saveTrackedTrade(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.saveTrackedTrade(arg0);
+            return result;
+        }
+    }
+    async saveUserCredential(arg0: UserCredential): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.saveUserCredential(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.saveUserCredential(arg0);
             return result;
         }
     }
     async updateMarketStatus(arg0: MarketStatus): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.updateMarketStatus(to_candid_MarketStatus_n58(this._uploadFile, this._downloadFile, arg0));
+                const result = await this.actor.updateMarketStatus(to_candid_MarketStatus_n59(this._uploadFile, this._downloadFile, arg0));
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.updateMarketStatus(to_candid_MarketStatus_n58(this._uploadFile, this._downloadFile, arg0));
+            const result = await this.actor.updateMarketStatus(to_candid_MarketStatus_n59(this._uploadFile, this._downloadFile, arg0));
             return result;
         }
     }
@@ -691,6 +683,9 @@ function from_candid_opt_n54(_uploadFile: (file: ExternalBlob) => Promise<Uint8A
 }
 function from_candid_opt_n55(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_TrendingCoin]): TrendingCoin | null {
     return value.length === 0 ? null : from_candid_TrendingCoin_n39(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_opt_n56(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_UserCredential]): UserCredential | null {
+    return value.length === 0 ? null : value[0];
 }
 function from_candid_record_n23(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     uid: string;
@@ -887,11 +882,11 @@ function to_candid_CoinCategory_n17(_uploadFile: (file: ExternalBlob) => Promise
 function to_candid_Direction_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Direction): _Direction {
     return to_candid_variant_n12(_uploadFile, _downloadFile, value);
 }
-function to_candid_MarketSentiment_n60(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: MarketSentiment): _MarketSentiment {
-    return to_candid_variant_n61(_uploadFile, _downloadFile, value);
+function to_candid_MarketSentiment_n61(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: MarketSentiment): _MarketSentiment {
+    return to_candid_variant_n62(_uploadFile, _downloadFile, value);
 }
-function to_candid_MarketStatus_n58(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: MarketStatus): _MarketStatus {
-    return to_candid_record_n59(_uploadFile, _downloadFile, value);
+function to_candid_MarketStatus_n59(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: MarketStatus): _MarketStatus {
+    return to_candid_record_n60(_uploadFile, _downloadFile, value);
 }
 function to_candid_NewsPost_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: NewsPost): _NewsPost {
     return to_candid_record_n6(_uploadFile, _downloadFile, value);
@@ -911,8 +906,8 @@ function to_candid_TradingSignal_n9(_uploadFile: (file: ExternalBlob) => Promise
 function to_candid_TrendingCoin_n15(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: TrendingCoin): _TrendingCoin {
     return to_candid_record_n16(_uploadFile, _downloadFile, value);
 }
-function to_candid_UserProfile_n56(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserProfile): _UserProfile {
-    return to_candid_record_n57(_uploadFile, _downloadFile, value);
+function to_candid_UserProfile_n57(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserProfile): _UserProfile {
+    return to_candid_record_n58(_uploadFile, _downloadFile, value);
 }
 function to_candid_UserRole_n19(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: UserRole): _UserRole {
     return to_candid_variant_n20(_uploadFile, _downloadFile, value);
@@ -986,7 +981,7 @@ function to_candid_record_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8A
         subscriptionExpiry: value.subscriptionExpiry
     };
 }
-function to_candid_record_n57(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+function to_candid_record_n58(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     status: SubscriptionStatus;
     username: string;
     subscriptionExpiry: Time;
@@ -999,21 +994,6 @@ function to_candid_record_n57(_uploadFile: (file: ExternalBlob) => Promise<Uint8
         status: to_candid_SubscriptionStatus_n3(_uploadFile, _downloadFile, value.status),
         username: value.username,
         subscriptionExpiry: value.subscriptionExpiry
-    };
-}
-function to_candid_record_n59(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
-    btcDominance: number;
-    marketCap: number;
-    sentiment: MarketSentiment;
-}): {
-    btcDominance: number;
-    marketCap: number;
-    sentiment: _MarketSentiment;
-} {
-    return {
-        btcDominance: value.btcDominance,
-        marketCap: value.marketCap,
-        sentiment: to_candid_MarketSentiment_n60(_uploadFile, _downloadFile, value.sentiment)
     };
 }
 function to_candid_record_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
@@ -1032,6 +1012,21 @@ function to_candid_record_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8A
         postCategory: to_candid_PostCategory_n7(_uploadFile, _downloadFile, value.postCategory),
         timestamp: value.timestamp,
         contentSummary: value.contentSummary
+    };
+}
+function to_candid_record_n60(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    btcDominance: number;
+    marketCap: number;
+    sentiment: MarketSentiment;
+}): {
+    btcDominance: number;
+    marketCap: number;
+    sentiment: _MarketSentiment;
+} {
+    return {
+        btcDominance: value.btcDominance,
+        marketCap: value.marketCap,
+        sentiment: to_candid_MarketSentiment_n61(_uploadFile, _downloadFile, value.sentiment)
     };
 }
 function to_candid_variant_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Direction): {
@@ -1101,7 +1096,7 @@ function to_candid_variant_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8
         expired: null
     } : value;
 }
-function to_candid_variant_n61(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: MarketSentiment): {
+function to_candid_variant_n62(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: MarketSentiment): {
     bullish: null;
 } | {
     bearish: null;

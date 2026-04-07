@@ -5,6 +5,8 @@ import {
   useEffect,
   useState,
 } from "react";
+import type { AppUserProfile, SubscriptionStatus } from "../backend";
+import { useActor } from "../hooks/useActor";
 
 export interface WBUser {
   username: string;
@@ -31,7 +33,7 @@ interface AuthContextType {
   login: (
     username: string,
     password: string,
-  ) => { success: boolean; error?: string };
+  ) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateProfile: (data: Partial<WBUser>) => void;
   allUsers: WBUser[];
@@ -39,7 +41,7 @@ interface AuthContextType {
     username: string,
     password: string,
     subType: "1day" | "1week" | "1month" | "1year",
-  ) => { success: boolean; error?: string };
+  ) => Promise<{ success: boolean; error?: string }>;
   deleteUser: (uid: string) => void;
   refreshUsers: () => void;
 }
@@ -63,11 +65,137 @@ function checkExpiry(expiry: string | null): "active" | "expired" | "none" {
   return new Date(expiry) > new Date() ? "active" : "expired";
 }
 
+/** Map WBUser to AppUserProfile for cloud persistence */
+function toAppUserProfile(u: WBUser): AppUserProfile {
+  return {
+    uid: u.uid,
+    username: u.username,
+    status: (u.status === "active"
+      ? "active"
+      : u.status === "expired"
+        ? "expired"
+        : "trial") as unknown as SubscriptionStatus,
+    subscriptionExpiry: u.subscriptionExpiry
+      ? BigInt(Math.floor(new Date(u.subscriptionExpiry).getTime() * 1_000_000))
+      : BigInt(0),
+  };
+}
+
+/** Map AppUserProfile from cloud to partial WBUser */
+function fromAppUserProfile(
+  p: AppUserProfile,
+): Partial<WBUser> & { uid: string; username: string } {
+  const statusVal = p.status as unknown as string;
+  const subscriptionExpiry =
+    p.subscriptionExpiry > BigInt(0)
+      ? new Date(Number(p.subscriptionExpiry) / 1_000_000).toISOString()
+      : null;
+  return {
+    uid: p.uid,
+    username: p.username,
+    subscriptionExpiry,
+    subscriptionType: null,
+    status: (statusVal === "active"
+      ? "active"
+      : statusVal === "expired"
+        ? "expired"
+        : "none") as "active" | "expired" | "none",
+  };
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { actor } = useActor();
   const [user, setUser] = useState<WBUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [allUsers, setAllUsers] = useState<WBUser[]>([]);
   const [userCredits, setUserCredits] = useState(10);
+
+  /** Merge cloud users AND credentials into localStorage, then load into state */
+  const syncFromCloud = useCallback(async () => {
+    if (!actor) return;
+    try {
+      // Run both in parallel
+      const [cloudProfiles, cloudCreds] = await Promise.all([
+        actor.getAllAppUserProfiles().catch(() => [] as AppUserProfile[]),
+        actor.getAllUserCredentials().catch(() => []),
+      ]);
+
+      const localRaw = localStorage.getItem("wb_users");
+      const localUsers: WBUser[] = localRaw ? JSON.parse(localRaw) : [];
+
+      // Merge users: cloud is source of truth for user existence
+      const merged: WBUser[] = [...localUsers];
+      for (const profile of cloudProfiles) {
+        const exists = merged.findIndex((u) => u.uid === profile.uid);
+        const fromCloud = fromAppUserProfile(profile);
+        if (exists === -1) {
+          merged.push({
+            username: fromCloud.username,
+            uid: fromCloud.uid,
+            subscriptionExpiry: fromCloud.subscriptionExpiry ?? null,
+            subscriptionType: null,
+            status: fromCloud.status ?? "none",
+            tradeHistory: { total: 0, wins: 0, losses: 0 },
+          });
+        }
+      }
+
+      localStorage.setItem("wb_users", JSON.stringify(merged));
+      setAllUsers(merged);
+
+      // Merge cloud credentials into local password store
+      if (cloudCreds.length > 0) {
+        const localPasswords: { username: string; password: string }[] =
+          JSON.parse(localStorage.getItem("wb_user_passwords") ?? "[]");
+        let updated = false;
+        for (const cred of cloudCreds) {
+          const exists = localPasswords.find(
+            (p) => p.username === cred.username,
+          );
+          if (!exists && cred.passwordHash) {
+            localPasswords.push({
+              username: cred.username,
+              password: cred.passwordHash,
+            });
+            updated = true;
+          }
+        }
+        if (updated) {
+          localStorage.setItem(
+            "wb_user_passwords",
+            JSON.stringify(localPasswords),
+          );
+        }
+
+        // Also merge subscriptionType from cloud creds into users
+        const reloaded: WBUser[] = JSON.parse(
+          localStorage.getItem("wb_users") ?? "[]",
+        );
+        let usersUpdated = false;
+        for (const cred of cloudCreds) {
+          const idx = reloaded.findIndex((u) => u.uid === cred.uid);
+          if (
+            idx !== -1 &&
+            !reloaded[idx].subscriptionType &&
+            cred.subscriptionType
+          ) {
+            reloaded[idx] = {
+              ...reloaded[idx],
+              subscriptionType:
+                cred.subscriptionType as WBUser["subscriptionType"],
+            };
+            usersUpdated = true;
+          }
+        }
+        if (usersUpdated) {
+          localStorage.setItem("wb_users", JSON.stringify(reloaded));
+          setAllUsers(reloaded);
+        }
+      }
+    } catch {
+      // Cloud sync failed — silently fall back to localStorage
+    }
+  }, [actor]);
 
   const loadUsers = useCallback(() => {
     try {
@@ -79,6 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Initial load: localStorage first, then sync from cloud
   useEffect(() => {
     loadUsers();
     // Restore session
@@ -98,37 +227,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (credits) setUserCredits(Number(credits));
   }, [loadUsers]);
 
-  // Auto-sync every 30 seconds — re-persist all data permanently
+  // Sync from cloud when actor becomes available
   useEffect(() => {
-    const id = setInterval(() => {
-      // Re-persist current user session
-      const currentUser = localStorage.getItem("wb_current_user");
-      const currentIsAdmin = localStorage.getItem("wb_is_admin");
-      const currentUsers = localStorage.getItem("wb_users");
-      const currentPasswords = localStorage.getItem("wb_user_passwords");
+    if (actor) {
+      syncFromCloud();
+    }
+  }, [actor, syncFromCloud]);
 
-      // Re-write all persistent data to ensure nothing is lost
-      if (currentUser) {
-        localStorage.setItem("wb_current_user", currentUser);
+  // Auto-sync every 30 seconds — push to cloud + pull from cloud
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (!actor) return;
+
+      // Push users + credentials to cloud
+      try {
+        const currentUsers: WBUser[] = JSON.parse(
+          localStorage.getItem("wb_users") ?? "[]",
+        );
+        const passwords: { username: string; password: string }[] = JSON.parse(
+          localStorage.getItem("wb_user_passwords") ?? "[]",
+        );
+
+        await Promise.all(
+          currentUsers.map(async (u) => {
+            try {
+              await actor.addAppUserProfile(toAppUserProfile(u));
+              const pwd = passwords.find((p) => p.username === u.username);
+              if (pwd) {
+                await actor.saveUserCredential({
+                  uid: u.uid,
+                  username: u.username,
+                  passwordHash: pwd.password,
+                  subscriptionType: u.subscriptionType ?? "1month",
+                  createdAt: BigInt(Date.now() * 1_000_000),
+                });
+              }
+            } catch {
+              // Skip individual failures
+            }
+          }),
+        );
+      } catch {
+        // Sync failed — silently continue
       }
-      if (currentIsAdmin) {
-        localStorage.setItem("wb_is_admin", currentIsAdmin);
-      }
-      if (currentUsers) {
-        localStorage.setItem("wb_users", currentUsers);
-      }
-      if (currentPasswords) {
-        localStorage.setItem("wb_user_passwords", currentPasswords);
-      }
+
+      // Also pull from cloud to catch cross-device changes
+      await syncFromCloud();
     }, 30000);
     return () => clearInterval(id);
-  }, []);
+  }, [actor, syncFromCloud]);
 
   const login = useCallback(
-    (
+    async (
       username: string,
       password: string,
-    ): { success: boolean; error?: string } => {
+    ): Promise<{ success: boolean; error?: string }> => {
       // Admin check
       if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
         const adminUser: WBUser = {
@@ -147,18 +300,138 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: true };
       }
 
-      // Regular user check
-      const users: WBUser[] = JSON.parse(
+      // Try local users first
+      let users: WBUser[] = JSON.parse(
         localStorage.getItem("wb_users") ?? "[]",
       );
-      const found = users.find((u) => u.username === username);
-      if (!found) return { success: false, error: "Username not found" };
+      let found = users.find((u) => u.username === username);
 
-      const stored: { username: string; password: string }[] = JSON.parse(
+      // Check local password store
+      let localPasswords: { username: string; password: string }[] = JSON.parse(
         localStorage.getItem("wb_user_passwords") ?? "[]",
       );
-      const creds = stored.find((c) => c.username === username);
-      if (!creds || creds.password !== password)
+      let localCred = localPasswords.find((c) => c.username === username);
+
+      // --- Cross-device login: if user or password not found locally, check cloud ---
+      if ((!found || !localCred) && actor) {
+        try {
+          const cloudCred = await actor.getUserCredentialByUsername(username);
+          if (cloudCred) {
+            // Found in cloud — verify password
+            if (cloudCred.passwordHash !== password) {
+              return { success: false, error: "Incorrect password" };
+            }
+
+            // Save to localStorage for fast future logins
+            if (!localCred) {
+              localPasswords.push({
+                username: cloudCred.username,
+                password: cloudCred.passwordHash,
+              });
+              localStorage.setItem(
+                "wb_user_passwords",
+                JSON.stringify(localPasswords),
+              );
+              localCred = { username, password };
+            }
+
+            // Find or restore user profile
+            if (!found) {
+              // Pull all profiles from cloud to find matching one
+              try {
+                const allProfiles = await actor.getAllAppUserProfiles();
+                const cloudProfile = allProfiles.find(
+                  (p) => p.username === username,
+                );
+                if (cloudProfile) {
+                  const fromCloud = fromAppUserProfile(cloudProfile);
+                  const restoredUser: WBUser = {
+                    username: fromCloud.username,
+                    uid: cloudCred.uid,
+                    subscriptionExpiry: fromCloud.subscriptionExpiry ?? null,
+                    subscriptionType:
+                      (cloudCred.subscriptionType as WBUser["subscriptionType"]) ??
+                      null,
+                    status: fromCloud.status ?? "none",
+                    tradeHistory: { total: 0, wins: 0, losses: 0 },
+                  };
+                  users = [...users, restoredUser];
+                  localStorage.setItem("wb_users", JSON.stringify(users));
+                  setAllUsers(users);
+                  found = restoredUser;
+                } else {
+                  // Build user from credential alone
+                  const expiryFromType = getSubExpiry(
+                    cloudCred.subscriptionType,
+                  );
+                  const restoredUser: WBUser = {
+                    username: cloudCred.username,
+                    uid: cloudCred.uid,
+                    subscriptionExpiry: expiryFromType,
+                    subscriptionType:
+                      (cloudCred.subscriptionType as WBUser["subscriptionType"]) ??
+                      null,
+                    status: "active",
+                    tradeHistory: { total: 0, wins: 0, losses: 0 },
+                  };
+                  users = [...users, restoredUser];
+                  localStorage.setItem("wb_users", JSON.stringify(users));
+                  setAllUsers(users);
+                  found = restoredUser;
+                }
+              } catch {
+                // Profile fetch failed — build minimal user from credential
+                const expiryFromType = getSubExpiry(cloudCred.subscriptionType);
+                const restoredUser: WBUser = {
+                  username: cloudCred.username,
+                  uid: cloudCred.uid,
+                  subscriptionExpiry: expiryFromType,
+                  subscriptionType:
+                    (cloudCred.subscriptionType as WBUser["subscriptionType"]) ??
+                    null,
+                  status: "active",
+                  tradeHistory: { total: 0, wins: 0, losses: 0 },
+                };
+                users = [...users, restoredUser];
+                localStorage.setItem("wb_users", JSON.stringify(users));
+                setAllUsers(users);
+                found = restoredUser;
+              }
+            }
+
+            // Log in successfully via cloud credential
+            const u: WBUser = {
+              ...found,
+              status: checkExpiry(found.subscriptionExpiry),
+              lastLogin: new Date().toISOString(),
+            };
+            setUser(u);
+            setIsAdmin(false);
+            localStorage.setItem("wb_current_user", JSON.stringify(u));
+            localStorage.setItem("wb_is_admin", "false");
+            const updated = users.map((usr) =>
+              usr.uid === u.uid ? { ...usr, lastLogin: u.lastLogin } : usr,
+            );
+            localStorage.setItem("wb_users", JSON.stringify(updated));
+            setAllUsers(updated);
+            return { success: true };
+          }
+        } catch {
+          // Cloud lookup failed — fall through to local check
+        }
+      }
+
+      if (!found) return { success: false, error: "Username not found" };
+
+      // Reload localCred in case it was just added during cloud lookup
+      localCred = (
+        JSON.parse(localStorage.getItem("wb_user_passwords") ?? "[]") as {
+          username: string;
+          password: string;
+        }[]
+      ).find((c) => c.username === username);
+
+      if (!localCred || localCred.password !== password)
         return { success: false, error: "Incorrect password" };
 
       const u: WBUser = {
@@ -180,7 +453,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return { success: true };
     },
-    [],
+    [actor],
   );
 
   const logout = useCallback(() => {
@@ -211,11 +484,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addUser = useCallback(
-    (
+    async (
       username: string,
       password: string,
       subType: "1day" | "1week" | "1month" | "1year",
-    ): { success: boolean; error?: string } => {
+    ): Promise<{ success: boolean; error?: string }> => {
       const users: WBUser[] = JSON.parse(
         localStorage.getItem("wb_users") ?? "[]",
       );
@@ -237,38 +510,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem("wb_users", JSON.stringify(updated));
       setAllUsers(updated);
 
-      // Store password permanently
+      // Store password permanently in local store
       const passwords: { username: string; password: string }[] = JSON.parse(
         localStorage.getItem("wb_user_passwords") ?? "[]",
       );
       passwords.push({ username, password });
       localStorage.setItem("wb_user_passwords", JSON.stringify(passwords));
 
+      // Persist to cloud — both profile and credential
+      if (actor) {
+        const createdAt = BigInt(Date.now() * 1_000_000);
+        await Promise.all([
+          actor.addAppUserProfile(toAppUserProfile(newUser)).catch(() => {}),
+          actor
+            .saveUserCredential({
+              uid,
+              username,
+              passwordHash: password,
+              subscriptionType: subType,
+              createdAt,
+            })
+            .catch(() => {}),
+        ]);
+      }
+
       return { success: true };
     },
-    [],
+    [actor],
   );
 
-  const deleteUser = useCallback((uid: string) => {
-    const users: WBUser[] = JSON.parse(
-      localStorage.getItem("wb_users") ?? "[]",
-    );
-    const toDelete = users.find((u) => u.uid === uid);
-    const updated = users.filter((u) => u.uid !== uid);
-    localStorage.setItem("wb_users", JSON.stringify(updated));
-    setAllUsers(updated);
-    if (toDelete) {
-      const passwords: { username: string; password: string }[] = JSON.parse(
-        localStorage.getItem("wb_user_passwords") ?? "[]",
+  const deleteUser = useCallback(
+    (uid: string) => {
+      const users: WBUser[] = JSON.parse(
+        localStorage.getItem("wb_users") ?? "[]",
       );
-      localStorage.setItem(
-        "wb_user_passwords",
-        JSON.stringify(
-          passwords.filter((p) => p.username !== toDelete.username),
-        ),
-      );
-    }
-  }, []);
+      const toDelete = users.find((u) => u.uid === uid);
+      const updated = users.filter((u) => u.uid !== uid);
+      localStorage.setItem("wb_users", JSON.stringify(updated));
+      setAllUsers(updated);
+      if (toDelete) {
+        const passwords: { username: string; password: string }[] = JSON.parse(
+          localStorage.getItem("wb_user_passwords") ?? "[]",
+        );
+        localStorage.setItem(
+          "wb_user_passwords",
+          JSON.stringify(
+            passwords.filter((p) => p.username !== toDelete.username),
+          ),
+        );
+        // Delete from cloud too
+        if (actor) {
+          actor.deleteUserCredential(uid).catch(() => {});
+        }
+      }
+    },
+    [actor],
+  );
 
   return (
     <AuthContext.Provider

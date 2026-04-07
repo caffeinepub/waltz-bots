@@ -1,24 +1,118 @@
 import Map "mo:core/Map";
-import Order "mo:core/Order";
-import Text "mo:core/Text";
-import Array "mo:core/Array";
-import Time "mo:core/Time";
 import Iter "mo:core/Iter";
+import Time "mo:core/Time";
+import Text "mo:core/Text";
 import Runtime "mo:core/Runtime";
 import Principal "mo:core/Principal";
-import List "mo:core/List";
-import Int "mo:core/Int";
-import Nat "mo:core/Nat";
-import Float "mo:core/Float";
 import AccessControl "authorization/access-control";
 import MixinAuthorization "authorization/MixinAuthorization";
-import Set "mo:core/Set";
+import Migration "migration";
 
+(with migration = Migration.run)
 actor {
+  // Include authentication mixin.
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
 
-  // User profile type for Principal-based authentication (required by frontend)
+  // ---- NEW TYPES ----
+
+  public type UserCredential = {
+    uid : Text;
+    username : Text;
+    passwordHash : Text;
+    subscriptionType : Text;
+    createdAt : Time.Time;
+  };
+
+  public type TrackedTradeRecord = {
+    tradeId : Text;
+    uid : Text;
+    tradeJson : Text;
+    updatedAt : Time.Time;
+  };
+
+  // ---- NEW PERSISTENT STATE ----
+
+  let userCredentials = Map.empty<Text, UserCredential>();
+  let usernameToUid = Map.empty<Text, Text>();
+  let trackedTrades = Map.empty<Text, TrackedTradeRecord>();
+
+  // ---- USER CREDENTIALS ----
+
+  public shared ({ caller }) func saveUserCredential(cred : UserCredential) : async () {
+    let existing = userCredentials.get(cred.uid);
+    switch (existing) {
+      case (null) {
+        userCredentials.add(cred.uid, cred);
+        usernameToUid.add(cred.username, cred.uid);
+      };
+      case (?existingCred) {
+        userCredentials.add(cred.uid, cred);
+        if (existingCred.username != cred.username) {
+          usernameToUid.remove(existingCred.username);
+          usernameToUid.add(cred.username, cred.uid);
+        };
+      };
+    };
+  };
+
+  public query ({ caller }) func getUserCredentialByUid(uid : Text) : async ?UserCredential {
+    userCredentials.get(uid);
+  };
+
+  public query ({ caller }) func getUserCredentialByUsername(username : Text) : async ?UserCredential {
+    let uid = usernameToUid.get(username);
+    switch (uid) {
+      case (null) { null };
+      case (?uid) { userCredentials.get(uid) };
+    };
+  };
+
+  public query ({ caller }) func getAllUserCredentials() : async [UserCredential] {
+    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+      Runtime.trap("Unauthorized: Admin only");
+    };
+    userCredentials.values().toArray();
+  };
+
+  public shared ({ caller }) func deleteUserCredential(uid : Text) : async () {
+    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+      Runtime.trap("Unauthorized: Admin only");
+    };
+
+    let cred = userCredentials.get(uid);
+    switch (cred) {
+      case (null) { () };
+      case (?cred) {
+        userCredentials.remove(uid);
+        usernameToUid.remove(cred.username);
+      };
+    };
+  };
+
+  // ---- TRACKED TRADES ----
+
+  public shared ({ caller }) func saveTrackedTrade(record : TrackedTradeRecord) : async () {
+    trackedTrades.add(record.tradeId, record);
+  };
+
+  public query ({ caller }) func getTrackedTradesForUser(uid : Text) : async [TrackedTradeRecord] {
+    trackedTrades.values().filter(func(x) { x.uid == uid }).toArray();
+  };
+
+  public shared ({ caller }) func deleteTrackedTrade(tradeId : Text) : async () {
+    trackedTrades.remove(tradeId);
+  };
+
+  public query ({ caller }) func getAllTrackedTrades() : async [TrackedTradeRecord] {
+    if (not (AccessControl.isAdmin(accessControlState, caller))) {
+      Runtime.trap("Unauthorized: Admin only");
+    };
+    trackedTrades.values().toArray();
+  };
+
+  // ---- EXISTING TYPES ----
+
   public type UserProfile = {
     username : Text;
     subscriptionExpiry : Time.Time;
@@ -26,14 +120,14 @@ actor {
   };
 
   // Application-specific user profile with UID
-  type AppUserProfile = {
+  public type AppUserProfile = {
     uid : Text;
     username : Text;
     subscriptionExpiry : Time.Time;
     status : SubscriptionStatus;
   };
 
-  type TradingSignal = {
+  public type TradingSignal = {
     coinName : Text;
     direction : Direction;
     entryPrice : Float;
@@ -43,14 +137,14 @@ actor {
     signalStatus : SignalStatus;
   };
 
-  type ScanReport = {
+  public type ScanReport = {
     totalCoinsScanned : Nat;
     totalSignalsGenerated : Nat;
     winRate : Float;
     activeSignalsCount : Nat;
   };
 
-  type TrendingCoin = {
+  public type TrendingCoin = {
     name : Text;
     symbol : Text;
     currentPrice : Float;
@@ -59,189 +153,56 @@ actor {
     category : CoinCategory;
   };
 
-  type NewsPost = {
+  public type NewsPost = {
     title : Text;
     contentSummary : Text;
     timestamp : Time.Time;
     postCategory : PostCategory;
   };
 
-  type MarketStatus = {
+  public type MarketStatus = {
     sentiment : MarketSentiment;
     btcDominance : Float;
     marketCap : Float;
   };
 
-  type SubscriptionStatus = {
+  public type SubscriptionStatus = {
     #active;
     #expired;
     #trial;
   };
 
-  type Direction = {
+  public type Direction = {
     #buy;
     #sell;
   };
 
-  type SignalStatus = {
+  public type SignalStatus = {
     #active;
     #completed;
     #cancelled;
   };
 
-  type CoinCategory = {
+  public type CoinCategory = {
     #trending;
     #hundredX;
   };
 
-  type PostCategory = {
+  public type PostCategory = {
     #news;
     #post;
   };
 
-  type MarketSentiment = {
+  public type MarketSentiment = {
     #bullish;
     #bearish;
     #neutral;
   };
 
-  module MarketSentiment {
-    public func compare(x : MarketSentiment, y : MarketSentiment) : Order.Order {
-      func rank(s : MarketSentiment) : Nat {
-        switch (s) {
-          case (#bullish) { 0 };
-          case (#bearish) { 1 };
-          case (#neutral) { 2 };
-        };
-      };
-      Nat.compare(rank(x), rank(y));
-    };
-  };
+  // ---- EXISTING PERSISTENT STATE ----
 
-  module SignalStatus {
-    public func compare(x : SignalStatus, y : SignalStatus) : Order.Order {
-      func rank(s : SignalStatus) : Nat {
-        switch (s) {
-          case (#active) { 0 };
-          case (#completed) { 1 };
-          case (#cancelled) { 2 };
-        };
-      };
-      Nat.compare(rank(x), rank(y));
-    };
-  };
-
-  module SubscriptionStatus {
-    public func compare(x : SubscriptionStatus, y : SubscriptionStatus) : Order.Order {
-      func rank(s : SubscriptionStatus) : Nat {
-        switch (s) {
-          case (#active) { 0 };
-          case (#expired) { 1 };
-          case (#trial) { 2 };
-        };
-      };
-      Nat.compare(rank(x), rank(y));
-    };
-  };
-
-  module Direction {
-    public func compare(x : Direction, y : Direction) : Order.Order {
-      func rank(d : Direction) : Nat {
-        switch (d) {
-          case (#buy) { 0 };
-          case (#sell) { 1 };
-        };
-      };
-      Nat.compare(rank(x), rank(y));
-    };
-  };
-
-  module CoinCategory {
-    public func compare(x : CoinCategory, y : CoinCategory) : Order.Order {
-      func rank(c : CoinCategory) : Nat {
-        switch (c) {
-          case (#trending) { 0 };
-          case (#hundredX) { 1 };
-        };
-      };
-      Nat.compare(rank(x), rank(y));
-    };
-  };
-
-  module PostCategory {
-    public func compare(x : PostCategory, y : PostCategory) : Order.Order {
-      func rank(p : PostCategory) : Nat {
-        switch (p) {
-          case (#news) { 0 };
-          case (#post) { 1 };
-        };
-      };
-      Nat.compare(rank(x), rank(y));
-    };
-  };
-
-  module AppUserProfile {
-    public func compare(a : AppUserProfile, b : AppUserProfile) : Order.Order {
-      Text.compare(a.uid, b.uid);
-    };
-
-    public func compareBySubscriptionExpiry(a : AppUserProfile, b : AppUserProfile) : Order.Order {
-      Int.compare(b.subscriptionExpiry, a.subscriptionExpiry);
-    };
-
-    public func compareByStatus(a : AppUserProfile, b : AppUserProfile) : Order.Order {
-      SubscriptionStatus.compare(a.status, b.status);
-    };
-  };
-
-  module TradingSignal {
-    public func compare(a : TradingSignal, b : TradingSignal) : Order.Order {
-      Text.compare(a.coinName, b.coinName);
-    };
-
-    public func compareByTimestamp(a : TradingSignal, b : TradingSignal) : Order.Order {
-      Int.compare(b.timestamp, a.timestamp);
-    };
-
-    public func compareByStatus(a : TradingSignal, b : TradingSignal) : Order.Order {
-      SignalStatus.compare(a.signalStatus, b.signalStatus);
-    };
-  };
-
-  module TrendingCoin {
-    public func compare(a : TrendingCoin, b : TrendingCoin) : Order.Order {
-      Text.compare(a.name, b.name);
-    };
-
-    public func compareByPrice(a : TrendingCoin, b : TrendingCoin) : Order.Order {
-      Float.compare(b.currentPrice, a.currentPrice);
-    };
-
-    public func compareByCategory(a : TrendingCoin, b : TrendingCoin) : Order.Order {
-      CoinCategory.compare(a.category, b.category);
-    };
-  };
-
-  module NewsPost {
-    public func compare(a : NewsPost, b : NewsPost) : Order.Order {
-      Text.compare(a.title, b.title);
-    };
-
-    public func compareByTimestamp(a : NewsPost, b : NewsPost) : Order.Order {
-      Int.compare(b.timestamp, a.timestamp);
-    };
-
-    public func compareByCategory(a : NewsPost, b : NewsPost) : Order.Order {
-      PostCategory.compare(a.postCategory, b.postCategory);
-    };
-  };
-
-  // Principal-based user profiles (for authentication system)
   let userProfiles = Map.empty<Principal, UserProfile>();
-  
-  // Application-specific user profiles with UIDs
   let appUserProfiles = Map.empty<Text, AppUserProfile>();
-  
   let tradingSignals = Map.empty<Text, TradingSignal>();
   let scanReport : ScanReport = {
     totalCoinsScanned = 1000;
@@ -257,7 +218,8 @@ actor {
     marketCap = 2000000000;
   };
 
-  // Required user profile functions for authentication system
+  // ---- REQUIRED USER PROFILE FUNCTIONS (Principal-based) ----
+
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can access profiles");
@@ -279,12 +241,21 @@ actor {
     userProfiles.add(caller, profile);
   };
 
-  // Application-specific user profile management (admin-only writes)
+  // ---- APP-SPECIFIC USER PROFILE MANAGEMENT (admin-only writes) ----
+
   public shared ({ caller }) func addAppUserProfile(profile : AppUserProfile) : async () {
     if (not (AccessControl.isAdmin(accessControlState, caller))) {
       Runtime.trap("Unauthorized: Only admins can add user profiles");
     };
     appUserProfiles.add(profile.uid, profile);
+  };
+
+  public query func getAppUserProfile(uid : Text) : async ?AppUserProfile {
+    appUserProfiles.get(uid);
+  };
+
+  public query func getAllAppUserProfiles() : async [AppUserProfile] {
+    appUserProfiles.values().toArray();
   };
 
   public shared ({ caller }) func addTradingSignal(signal : TradingSignal) : async () {
@@ -294,11 +265,27 @@ actor {
     tradingSignals.add(signal.coinName, signal);
   };
 
+  public query func getTradingSignal(coinName : Text) : async ?TradingSignal {
+    tradingSignals.get(coinName);
+  };
+
+  public query func getAllTradingSignals() : async [TradingSignal] {
+    tradingSignals.values().toArray();
+  };
+
   public shared ({ caller }) func addTrendingCoin(coin : TrendingCoin) : async () {
     if (not (AccessControl.isAdmin(accessControlState, caller))) {
       Runtime.trap("Unauthorized: Only admins can add trending coins");
     };
     trendingCoins.add(coin.name, coin);
+  };
+
+  public query func getTrendingCoin(name : Text) : async ?TrendingCoin {
+    trendingCoins.get(name);
+  };
+
+  public query func getAllTrendingCoins() : async [TrendingCoin] {
+    trendingCoins.values().toArray();
   };
 
   public shared ({ caller }) func addNewsPost(post : NewsPost) : async () {
@@ -308,6 +295,14 @@ actor {
     newsPosts.add(post.title, post);
   };
 
+  public query func getNewsPost(title : Text) : async ?NewsPost {
+    newsPosts.get(title);
+  };
+
+  public query func getAllNewsPosts() : async [NewsPost] {
+    newsPosts.values().toArray();
+  };
+
   public shared ({ caller }) func updateMarketStatus(status : MarketStatus) : async () {
     if (not (AccessControl.isAdmin(accessControlState, caller))) {
       Runtime.trap("Unauthorized: Only admins can update market status");
@@ -315,93 +310,12 @@ actor {
     marketStatus := status;
   };
 
-  // Public read functions (no authorization required)
-  public query func getAppUserProfile(uid : Text) : async ?AppUserProfile {
-    appUserProfiles.get(uid);
-  };
-
-  public query func getAllAppUserProfiles() : async [AppUserProfile] {
-    appUserProfiles.values().toArray().sort();
-  };
-
-  public query func getAppUserProfilesByStatus(status : SubscriptionStatus) : async [AppUserProfile] {
-    let filtered = appUserProfiles.values().filter(
-      func(p) { SubscriptionStatus.compare(p.status, status) == #equal }
-    );
-    filtered.toArray().sort();
-  };
-
-  public query func getAppUserProfilesBySubscriptionExpiry() : async [AppUserProfile] {
-    appUserProfiles.values().toArray().sort(AppUserProfile.compareBySubscriptionExpiry);
-  };
-
-  public query func getTradingSignal(coinName : Text) : async ?TradingSignal {
-    tradingSignals.get(coinName);
-  };
-
-  public query func getAllTradingSignals() : async [TradingSignal] {
-    tradingSignals.values().toArray().sort();
-  };
-
-  public query func getTradingSignalsByStatus(status : SignalStatus) : async [TradingSignal] {
-    tradingSignals.values().filter(
-      func(s) { SignalStatus.compare(s.signalStatus, status) == #equal }
-    ).toArray();
-  };
-
-  public query func getTradingSignalsByCoinName() : async [TradingSignal] {
-    tradingSignals.values().toArray().sort();
-  };
-
-  public query func getTradingSignalsByTimestamp() : async [TradingSignal] {
-    tradingSignals.values().toArray().sort(TradingSignal.compareByTimestamp);
-  };
-
-  public query func getScanReport() : async ScanReport {
-    scanReport;
-  };
-
-  public query func getTrendingCoin(name : Text) : async ?TrendingCoin {
-    trendingCoins.get(name);
-  };
-
-  public query func getAllTrendingCoins() : async [TrendingCoin] {
-    trendingCoins.values().toArray().sort();
-  };
-
-  public query func getTrendingCoinsByCategory(category : CoinCategory) : async [TrendingCoin] {
-    trendingCoins.values().filter(
-      func(c) { CoinCategory.compare(c.category, category) == #equal }
-    ).toArray();
-  };
-
-  public query func getTrendingCoinsByPrice() : async [TrendingCoin] {
-    trendingCoins.values().toArray().sort(TrendingCoin.compareByPrice);
-  };
-
-  public query func getNewsPost(title : Text) : async ?NewsPost {
-    newsPosts.get(title);
-  };
-
-  public query func getAllNewsPosts() : async [NewsPost] {
-    newsPosts.values().toArray().sort();
-  };
-
-  public query func getNewsPostsByCategory(category : PostCategory) : async [NewsPost] {
-    newsPosts.values().filter(
-      func(p) { PostCategory.compare(p.postCategory, category) == #equal }
-    ).toArray();
-  };
-
-  public query func getNewsPostsByTimestamp() : async [NewsPost] {
-    newsPosts.values().toArray().sort(NewsPost.compareByTimestamp);
-  };
-
   public query func getMarketStatus() : async MarketStatus {
     marketStatus;
   };
 
-  // Seed data for application-specific profiles
+  // ---- INIT SEED DATA ----
+
   appUserProfiles.add(
     "1",
     {

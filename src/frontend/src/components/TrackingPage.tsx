@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/AuthContext";
 import { useNotifications } from "@/context/NotificationContext";
+import { useActor } from "@/hooks/useActor";
 import { liveReanalysis, useLivePrices } from "@/hooks/useMarketData";
 import { type LiveSignal, SCAN_SYMBOLS } from "@/hooks/useSignals";
 import {
@@ -23,8 +24,9 @@ import {
   XCircle,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { TrackedTradeRecord } from "../backend";
 
 // TrackedTrade extends LiveSignal with tracking-specific fields
 interface TrackedTrade extends LiveSignal {
@@ -44,7 +46,7 @@ interface TradeAnalysisEntry {
   closePrice: number;
   targetPrice: number;
   stopLoss: number;
-  outcome: "win" | "loss";
+  outcome: "WIN" | "LOSS";
   profitPercent: number;
   closedAt: string;
   addedAt: string;
@@ -641,6 +643,7 @@ function TrackCard({
 
 export function TrackingPage() {
   const { user, updateProfile } = useAuth();
+  const { actor } = useActor();
   const storageKey = user ? `wb_tracked_${user.uid}` : "wb_tracked_guest";
 
   // Initialize empty; load from per-user key in effect
@@ -648,15 +651,68 @@ export function TrackingPage() {
   const [tradeHistory, setTradeHistory] = useState<TradeAnalysisEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Load tracked trades whenever the storage key changes (login/logout)
+  // Helper: sync all current trades to cloud
+  const syncToCloud = useCallback(
+    async (trades: TrackedTrade[]) => {
+      if (!actor || !user) return;
+      await Promise.all(
+        trades.map((t) =>
+          actor
+            .saveTrackedTrade({
+              tradeId: t.id,
+              uid: user.uid,
+              tradeJson: JSON.stringify(t),
+              updatedAt: BigInt(Date.now() * 1_000_000),
+            } satisfies TrackedTradeRecord)
+            .catch(() => {}),
+        ),
+      );
+    },
+    [actor, user],
+  );
+
+  // Load tracked trades — localStorage first, then merge from cloud
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      setTracked(saved ? JSON.parse(saved) : []);
-    } catch {
-      setTracked([]);
-    }
-  }, [storageKey]);
+    const loadTrades = async () => {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        const localTrades: TrackedTrade[] = saved ? JSON.parse(saved) : [];
+        setTracked(localTrades);
+
+        // Merge from cloud using per-user tracked trade endpoint
+        if (actor && user) {
+          try {
+            const cloudRecords = await actor.getTrackedTradesForUser(user.uid);
+            if (cloudRecords.length > 0) {
+              const localIds = new Set(localTrades.map((t) => t.id));
+              const newFromCloud: TrackedTrade[] = [];
+              for (const record of cloudRecords) {
+                if (!localIds.has(record.tradeId)) {
+                  try {
+                    const parsed = JSON.parse(record.tradeJson) as TrackedTrade;
+                    newFromCloud.push(parsed);
+                  } catch {
+                    // Skip malformed records
+                  }
+                }
+              }
+              if (newFromCloud.length > 0) {
+                const merged = [...localTrades, ...newFromCloud];
+                setTracked(merged);
+                localStorage.setItem(storageKey, JSON.stringify(merged));
+              }
+            }
+          } catch {
+            // Cloud fetch failed — use local only
+          }
+        }
+      } catch {
+        setTracked([]);
+      }
+    };
+    loadTrades();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, actor, user]);
 
   // Auto-refresh every 15 seconds
   const [refreshTick, setRefreshTick] = useState(0);
@@ -669,6 +725,19 @@ export function TrackingPage() {
     }, 15000);
     return () => clearInterval(id);
   }, []);
+
+  // 30-second auto-sync to cloud
+  useEffect(() => {
+    const id = setInterval(() => {
+      const currentTrades: TrackedTrade[] = JSON.parse(
+        localStorage.getItem(storageKey) ?? "[]",
+      );
+      if (currentTrades.length > 0) {
+        syncToCloud(currentTrades);
+      }
+    }, 30000);
+    return () => clearInterval(id);
+  }, [storageKey, syncToCloud]);
 
   // Load trade analysis history
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is intentionally used as a trigger
@@ -685,120 +754,144 @@ export function TrackingPage() {
   }, [user, refreshTick]);
 
   // Remove a tracked trade by ID
-  const removeTrade = (id: string) => {
-    const updated = tracked.filter((t) => t.id !== id);
-    setTracked(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-  };
+  const removeTrade = useCallback(
+    (id: string) => {
+      const updated = tracked.filter((t) => t.id !== id);
+      setTracked(updated);
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      // Delete from cloud and sync remaining
+      if (actor && user) {
+        actor.deleteTrackedTrade(id).catch(() => {});
+        syncToCloud(updated);
+      }
+    },
+    [tracked, storageKey, actor, user, syncToCloud],
+  );
 
   // Close trade as WIN
-  const closeTradeAsWin = (trade: TrackedTrade, livePrice: number) => {
-    const uid = user?.uid ?? "guest";
-    const analysis: TradeAnalysisEntry = {
-      id: `ta-${Date.now()}`,
-      symbol: trade.symbol,
-      coinName: trade.coinName,
-      direction: trade.direction,
-      entryPrice: trade.entryPrice,
-      closePrice: livePrice,
-      targetPrice: trade.targetPrice,
-      stopLoss: trade.stopLoss,
-      outcome: "win",
-      profitPercent: trade.profitPercent,
-      closedAt: new Date().toISOString(),
-      addedAt: trade.addedAt,
-      aiNote: `WIN: ${trade.coinName} hit take profit at $${trade.targetPrice.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. Profit: +${trade.profitPercent.toFixed(2)}%. Multi-TF confluence was ${
-        trade.multiTimeframeConfluence ? "active" : "partial"
-      }. RSI at entry: ${trade.rsiValue.toFixed(1)}. This pattern reinforces our ${trade.trend} trend + ${trade.direction} signal logic.`,
-    };
-    const logKey = `wb_trade_analysis_${uid}`;
-    const existing: TradeAnalysisEntry[] = JSON.parse(
-      localStorage.getItem(logKey) ?? "[]",
-    );
-    const updatedLog = [analysis, ...existing];
-    localStorage.setItem(logKey, JSON.stringify(updatedLog));
-    setTradeHistory(updatedLog);
+  const closeTradeAsWin = useCallback(
+    (trade: TrackedTrade, livePrice: number) => {
+      const uid = user?.uid ?? "guest";
+      const analysis: TradeAnalysisEntry = {
+        id: `ta-${Date.now()}`,
+        symbol: trade.symbol,
+        coinName: trade.coinName,
+        direction: trade.direction,
+        entryPrice: trade.entryPrice,
+        closePrice: livePrice,
+        targetPrice: trade.targetPrice,
+        stopLoss: trade.stopLoss,
+        outcome: "WIN",
+        profitPercent: trade.profitPercent,
+        closedAt: new Date().toISOString(),
+        addedAt: trade.addedAt,
+        aiNote: `WIN: ${trade.coinName} hit take profit at $${trade.targetPrice.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. Profit: +${trade.profitPercent.toFixed(2)}%. Multi-TF confluence was ${
+          trade.multiTimeframeConfluence ? "active" : "partial"
+        }. RSI at entry: ${trade.rsiValue.toFixed(1)}. This pattern reinforces our ${trade.trend} trend + ${trade.direction} signal logic.`,
+      };
+      const logKey = `wb_trade_analysis_${uid}`;
+      const existing: TradeAnalysisEntry[] = JSON.parse(
+        localStorage.getItem(logKey) ?? "[]",
+      );
+      const updatedLog = [analysis, ...existing];
+      localStorage.setItem(logKey, JSON.stringify(updatedLog));
+      setTradeHistory(updatedLog);
 
-    const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
-    updateProfile({
-      tradeHistory: {
-        total: current.total + 1,
-        wins: current.wins + 1,
-        losses: current.losses,
-      },
-    });
+      const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
+      updateProfile({
+        tradeHistory: {
+          total: current.total + 1,
+          wins: current.wins + 1,
+          losses: current.losses,
+        },
+      });
 
-    const updated = tracked.map((t) =>
-      t.id === trade.id
-        ? { ...t, outcome: "win" as const, closedAt: new Date().toISOString() }
-        : t,
-    );
-    setTracked(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-    toast.success(`🎯 ${trade.coinName} marked as WIN! Trade history updated.`);
-  };
+      const updated = tracked.map((t) =>
+        t.id === trade.id
+          ? {
+              ...t,
+              outcome: "win" as const,
+              closedAt: new Date().toISOString(),
+            }
+          : t,
+      );
+      setTracked(updated);
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      // Sync to cloud
+      syncToCloud(updated);
+      toast.success(
+        `🎯 ${trade.coinName} marked as WIN! Trade history updated.`,
+      );
+    },
+    [tracked, storageKey, user, updateProfile, syncToCloud],
+  );
 
   // Close trade as LOSS
-  const closeTradeAsLoss = (trade: TrackedTrade, livePrice: number) => {
-    const uid = user?.uid ?? "guest";
-    const analysis: TradeAnalysisEntry = {
-      id: `ta-${Date.now()}`,
-      symbol: trade.symbol,
-      coinName: trade.coinName,
-      direction: trade.direction,
-      entryPrice: trade.entryPrice,
-      closePrice: livePrice,
-      targetPrice: trade.targetPrice,
-      stopLoss: trade.stopLoss,
-      outcome: "loss",
-      profitPercent: -Math.abs(trade.profitPercent),
-      closedAt: new Date().toISOString(),
-      addedAt: trade.addedAt,
-      aiNote: `LOSS: ${trade.coinName} hit stop loss at $${trade.stopLoss.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. RSI at entry: ${trade.rsiValue.toFixed(1)}, Trend: ${trade.trend}. This trade is flagged for AI learning to improve signal filtering. Symbol added to SL blacklist.`,
-    };
-    const logKey = `wb_trade_analysis_${uid}`;
-    const existing: TradeAnalysisEntry[] = JSON.parse(
-      localStorage.getItem(logKey) ?? "[]",
-    );
-    const updatedLog = [analysis, ...existing];
-    localStorage.setItem(logKey, JSON.stringify(updatedLog));
-    setTradeHistory(updatedLog);
-
-    // Add symbol to global SL blacklist
-    const slHits: string[] = JSON.parse(
-      localStorage.getItem("wb_sl_hits") ?? "[]",
-    );
-    if (!slHits.includes(trade.symbol)) {
-      localStorage.setItem(
-        "wb_sl_hits",
-        JSON.stringify([...slHits, trade.symbol]),
+  const closeTradeAsLoss = useCallback(
+    (trade: TrackedTrade, livePrice: number) => {
+      const uid = user?.uid ?? "guest";
+      const analysis: TradeAnalysisEntry = {
+        id: `ta-${Date.now()}`,
+        symbol: trade.symbol,
+        coinName: trade.coinName,
+        direction: trade.direction,
+        entryPrice: trade.entryPrice,
+        closePrice: livePrice,
+        targetPrice: trade.targetPrice,
+        stopLoss: trade.stopLoss,
+        outcome: "LOSS",
+        profitPercent: -Math.abs(trade.profitPercent),
+        closedAt: new Date().toISOString(),
+        addedAt: trade.addedAt,
+        aiNote: `LOSS: ${trade.coinName} hit stop loss at $${trade.stopLoss.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. RSI at entry: ${trade.rsiValue.toFixed(1)}, Trend: ${trade.trend}. This trade is flagged for AI learning to improve signal filtering. Symbol added to SL blacklist.`,
+      };
+      const logKey = `wb_trade_analysis_${uid}`;
+      const existing: TradeAnalysisEntry[] = JSON.parse(
+        localStorage.getItem(logKey) ?? "[]",
       );
-    }
+      const updatedLog = [analysis, ...existing];
+      localStorage.setItem(logKey, JSON.stringify(updatedLog));
+      setTradeHistory(updatedLog);
 
-    const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
-    updateProfile({
-      tradeHistory: {
-        total: current.total + 1,
-        wins: current.wins,
-        losses: current.losses + 1,
-      },
-    });
+      // Add symbol to global SL blacklist
+      const slHits: string[] = JSON.parse(
+        localStorage.getItem("wb_sl_hits") ?? "[]",
+      );
+      if (!slHits.includes(trade.symbol)) {
+        localStorage.setItem(
+          "wb_sl_hits",
+          JSON.stringify([...slHits, trade.symbol]),
+        );
+      }
 
-    const updated = tracked.map((t) =>
-      t.id === trade.id
-        ? {
-            ...t,
-            outcome: "loss" as const,
-            closedAt: new Date().toISOString(),
-          }
-        : t,
-    );
-    setTracked(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-    toast.error(
-      `⛔ ${trade.coinName} marked as LOSS. Symbol blacklisted from future signals.`,
-    );
-  };
+      const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
+      updateProfile({
+        tradeHistory: {
+          total: current.total + 1,
+          wins: current.wins,
+          losses: current.losses + 1,
+        },
+      });
+
+      const updated = tracked.map((t) =>
+        t.id === trade.id
+          ? {
+              ...t,
+              outcome: "loss" as const,
+              closedAt: new Date().toISOString(),
+            }
+          : t,
+      );
+      setTracked(updated);
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      // Sync to cloud
+      syncToCloud(updated);
+      toast.error(
+        `⛔ ${trade.coinName} marked as LOSS. Symbol blacklisted from future signals.`,
+      );
+    },
+    [tracked, storageKey, user, updateProfile, syncToCloud],
+  );
 
   // Update verdict states per trade
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -891,7 +984,7 @@ export function TrackingPage() {
           <p className="text-gray-500 text-xs">
             Verdicts recomputed from Binance price feeds every 15s. Update
             Verdict button runs a full re-analysis with RSI, MACD, multi-TF
-            confluence check.
+            confluence check. Cloud sync every 30s.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 ml-auto">
@@ -974,8 +1067,8 @@ export function TrackingPage() {
                 border: "1px solid rgba(212,175,55,0.25)",
               }}
             >
-              {tradeHistory.filter((t) => t.outcome === "win").length}W /{" "}
-              {tradeHistory.filter((t) => t.outcome === "loss").length}L
+              {tradeHistory.filter((t) => t.outcome === "WIN").length}W /{""}
+              {tradeHistory.filter((t) => t.outcome === "LOSS").length}L
             </span>
             {showHistory ? (
               <ChevronUp className="w-4 h-4 text-gold" />
@@ -1017,12 +1110,12 @@ export function TrackingPage() {
                       style={{
                         background: "linear-gradient(135deg, #0B1F3B, #0A254A)",
                         border: `1px solid ${
-                          entry.outcome === "win"
+                          entry.outcome === "WIN"
                             ? "rgba(34,197,94,0.35)"
                             : "rgba(239,68,68,0.35)"
                         }`,
                         borderLeft: `4px solid ${
-                          entry.outcome === "win" ? "#22C55E" : "#EF4444"
+                          entry.outcome === "WIN" ? "#22C55E" : "#EF4444"
                         }`,
                       }}
                     >
@@ -1072,21 +1165,21 @@ export function TrackingPage() {
                             className="px-2.5 py-0.5 rounded-full text-xs font-black"
                             style={{
                               background:
-                                entry.outcome === "win"
+                                entry.outcome === "WIN"
                                   ? "rgba(34,197,94,0.2)"
                                   : "rgba(239,68,68,0.2)",
                               color:
-                                entry.outcome === "win" ? "#22C55E" : "#EF4444",
+                                entry.outcome === "WIN" ? "#22C55E" : "#EF4444",
                               border: `1px solid ${
-                                entry.outcome === "win"
+                                entry.outcome === "WIN"
                                   ? "rgba(34,197,94,0.4)"
                                   : "rgba(239,68,68,0.4)"
                               }`,
                             }}
                           >
-                            {entry.outcome === "win" ? "✅ WIN" : "❌ LOSS"}
+                            {entry.outcome === "WIN" ? "✅ WIN" : "❌ LOSS"}
                           </span>
-                          {entry.outcome === "win" ? (
+                          {entry.outcome === "WIN" ? (
                             <TrendingUp className="w-4 h-4 text-green-400" />
                           ) : (
                             <TrendingDown className="w-4 h-4 text-red-400" />
@@ -1117,7 +1210,7 @@ export function TrackingPage() {
                             className="font-bold"
                             style={{
                               color:
-                                entry.outcome === "win" ? "#22C55E" : "#EF4444",
+                                entry.outcome === "WIN" ? "#22C55E" : "#EF4444",
                             }}
                           >
                             $
@@ -1135,10 +1228,10 @@ export function TrackingPage() {
                             className="font-bold"
                             style={{
                               color:
-                                entry.outcome === "win" ? "#22C55E" : "#EF4444",
+                                entry.outcome === "WIN" ? "#22C55E" : "#EF4444",
                             }}
                           >
-                            {entry.outcome === "win" ? "+" : ""}
+                            {entry.outcome === "WIN" ? "+" : ""}
                             {entry.profitPercent.toFixed(2)}%
                           </p>
                         </div>

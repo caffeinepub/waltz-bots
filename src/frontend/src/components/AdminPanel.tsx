@@ -20,10 +20,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
 import type { WBUser } from "@/context/AuthContext";
+import { useActor } from "@/hooks/useActor";
 import {
   Activity,
+  ArrowRight,
   Brain,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
   FileText,
   ImageIcon,
   LogOut,
@@ -32,13 +36,15 @@ import {
   Shield,
   Sparkles,
   Trash2,
+  TrendingUp,
   UserCheck,
   Users,
   XCircle,
 } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { TrackedTradeRecord } from "../backend";
 import { AIDashboardPage } from "./AIDashboardPage";
 import type { FeedbackItem } from "./FeedbackPage";
 
@@ -62,6 +68,20 @@ interface ImprovementLogEntry {
   userName: string;
 }
 
+// Parsed trade for display
+interface ParsedTrade {
+  id: string;
+  symbol: string;
+  coinName: string;
+  direction: string;
+  entryPrice: number;
+  targetPrice: number;
+  stopLoss: number;
+  outcome?: string;
+  profitPercent?: number;
+  addedAt?: string;
+}
+
 function loadPosts(): AdminPost[] {
   try {
     return JSON.parse(localStorage.getItem("wb_posts") ?? "[]");
@@ -72,6 +92,14 @@ function loadPosts(): AdminPost[] {
 
 function savePosts(posts: AdminPost[]) {
   localStorage.setItem("wb_posts", JSON.stringify(posts));
+}
+
+function subTypeLabel(type: string | null | undefined): string {
+  if (type === "1day") return "1 Day";
+  if (type === "1week") return "1 Week";
+  if (type === "1month") return "1 Month";
+  if (type === "1year") return "1 Year";
+  return type ?? "—";
 }
 
 // ──────────────────────────────────────────────────────
@@ -114,10 +142,11 @@ function BentoTile({
 }
 
 // ──────────────────────────────────────────────────────
-// Users Tab
+// Users Tab — with cloud-loaded tracked trades
 // ──────────────────────────────────────────────────────
 function UsersTab() {
   const { allUsers, addUser, deleteUser, refreshUsers } = useAuth();
+  const { actor } = useActor();
   const [showAdd, setShowAdd] = useState(false);
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -126,13 +155,67 @@ function UsersTab() {
   );
   const [addError, setAddError] = useState("");
 
-  const handleAdd = () => {
+  // All tracked trades from cloud, keyed by uid
+  const [allTrackedTrades, setAllTrackedTrades] = useState<
+    TrackedTradeRecord[]
+  >([]);
+  const [expandedUid, setExpandedUid] = useState<string | null>(null);
+  const [loadingTrades, setLoadingTrades] = useState(false);
+
+  // Load all tracked trades from backend when actor is available
+  useEffect(() => {
+    if (!actor) return;
+    setLoadingTrades(true);
+    actor
+      .getAllTrackedTrades()
+      .then((records) => {
+        setAllTrackedTrades(records);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingTrades(false));
+  }, [actor]);
+
+  // Group trades by uid
+  const tradesByUid = allTrackedTrades.reduce<
+    Record<string, TrackedTradeRecord[]>
+  >((acc, t) => {
+    if (!acc[t.uid]) acc[t.uid] = [];
+    acc[t.uid].push(t);
+    return acc;
+  }, {});
+
+  // Parse a TrackedTradeRecord into display fields
+  function parseTrade(record: TrackedTradeRecord): ParsedTrade | null {
+    try {
+      const t = JSON.parse(record.tradeJson);
+      return {
+        id: record.tradeId,
+        symbol: t.symbol ?? "?",
+        coinName: t.coinName ?? t.symbol ?? "?",
+        direction: t.direction ?? "BUY",
+        entryPrice: t.entryPrice ?? 0,
+        targetPrice: t.targetPrice ?? 0,
+        stopLoss: t.stopLoss ?? 0,
+        outcome: t.outcome,
+        profitPercent: t.profitPercent,
+        addedAt: t.addedAt,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const handleAdd = async () => {
     setAddError("");
     if (!newUsername.trim() || !newPassword.trim()) {
       setAddError("Username and password are required.");
       return;
     }
-    const result = addUser(newUsername.trim(), newPassword.trim(), subType);
+    const result = await addUser(
+      newUsername.trim(),
+      newPassword.trim(),
+      subType,
+    );
     if (!result.success) {
       setAddError(result.error ?? "Error creating user.");
       return;
@@ -169,51 +252,100 @@ function UsersTab() {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" data-ocid="admin.users.table">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {["Username", "UID", "Status", "Expiry", "Last Login", ""].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="text-left py-2 px-3 text-xs font-semibold text-gray-400"
+        <div className="space-y-2" data-ocid="admin.users.table">
+          {/* Table header */}
+          <div
+            className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-gray-400"
+            style={{ background: "rgba(11,31,59,0.04)" }}
+          >
+            <span>Username</span>
+            <span>UID</span>
+            <span>Subscription</span>
+            <span>Status</span>
+            <span>Expiry</span>
+            <span>Trades</span>
+            <span />
+          </div>
+
+          {allUsers.map((u: WBUser, i: number) => {
+            const userTrades = tradesByUid[u.uid] ?? [];
+            const isExpanded = expandedUid === u.uid;
+            const openTrades = userTrades.filter((t) => {
+              try {
+                const p = JSON.parse(t.tradeJson);
+                return !p.outcome || p.outcome === "open";
+              } catch {
+                return false;
+              }
+            });
+            const wins = userTrades.filter((t) => {
+              try {
+                return JSON.parse(t.tradeJson).outcome === "win";
+              } catch {
+                return false;
+              }
+            });
+            const losses = userTrades.filter((t) => {
+              try {
+                return JSON.parse(t.tradeJson).outcome === "loss";
+              } catch {
+                return false;
+              }
+            });
+
+            return (
+              <motion.div
+                key={u.uid}
+                data-ocid={`admin.users.item.${i + 1}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="rounded-xl overflow-hidden"
+                style={{
+                  background: "rgba(255,255,255,0.9)",
+                  border: "1px solid rgba(11,31,59,0.08)",
+                }}
+              >
+                {/* Main row */}
+                <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-2 items-center px-3 py-2.5">
+                  {/* Username */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-navy flex-shrink-0"
+                      style={{
+                        background: "linear-gradient(135deg, #F2D27A, #D4AF37)",
+                      }}
                     >
-                      {h}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {allUsers.map((u: WBUser, i: number) => (
-                <motion.tr
-                  key={u.uid}
-                  data-ocid={`admin.users.item.${i + 1}`}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="border-b border-gray-50 hover:bg-gray-50/50"
-                >
-                  <td className="py-2 px-3">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-navy"
-                        style={{
-                          background:
-                            "linear-gradient(135deg, #F2D27A, #D4AF37)",
-                        }}
-                      >
-                        {u.username[0].toUpperCase()}
-                      </div>
-                      <span className="font-medium text-navy">
-                        {u.username}
-                      </span>
+                      {u.username[0].toUpperCase()}
                     </div>
-                  </td>
-                  <td className="py-2 px-3 font-mono text-xs text-gray-500">
-                    {u.uid}
-                  </td>
-                  <td className="py-2 px-3">
+                    <span className="font-medium text-navy text-sm truncate">
+                      {u.username}
+                    </span>
+                  </div>
+
+                  {/* UID — truncated, full on hover */}
+                  <span
+                    className="font-mono text-xs text-gray-400 cursor-default"
+                    title={u.uid}
+                  >
+                    {u.uid.length > 14
+                      ? `${u.uid.slice(0, 7)}…${u.uid.slice(-4)}`
+                      : u.uid}
+                  </span>
+
+                  {/* Subscription type badge */}
+                  <span
+                    className="px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap"
+                    style={{
+                      background: "rgba(212,175,55,0.12)",
+                      color: "#D4AF37",
+                      border: "1px solid rgba(212,175,55,0.3)",
+                    }}
+                  >
+                    {subTypeLabel(u.subscriptionType)}
+                  </span>
+
+                  {/* Active / Expired */}
+                  <span className="whitespace-nowrap">
                     {u.status === "active" ? (
                       <Badge className="bg-green-500/20 text-green-600 border-green-500/30 text-xs">
                         Active
@@ -223,35 +355,300 @@ function UsersTab() {
                         Expired
                       </Badge>
                     )}
-                  </td>
-                  <td className="py-2 px-3 text-xs text-gray-500">
+                  </span>
+
+                  {/* Expiry date */}
+                  <span className="text-xs text-gray-500 whitespace-nowrap">
                     {u.subscriptionExpiry
-                      ? new Date(u.subscriptionExpiry).toLocaleDateString()
+                      ? new Date(u.subscriptionExpiry).toLocaleDateString(
+                          "en-GB",
+                        )
                       : "—"}
-                  </td>
-                  <td className="py-2 px-3 text-xs text-gray-400">
-                    {u.lastLogin
-                      ? new Date(u.lastLogin).toLocaleDateString()
-                      : "Never"}
-                  </td>
-                  <td className="py-2 px-3">
-                    <Button
-                      data-ocid={`admin.users.delete_button.${i + 1}`}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        deleteUser(u.uid);
-                        toast.success(`User "${u.username}" deleted.`);
-                      }}
-                      className="text-red-400 hover:text-red-600 h-7 w-7 p-0"
+                  </span>
+
+                  {/* Trades badge + expand toggle */}
+                  <button
+                    type="button"
+                    data-ocid={`admin.users.toggle.${i + 1}`}
+                    onClick={() => setExpandedUid(isExpanded ? null : u.uid)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-all hover:opacity-80"
+                    style={{
+                      background:
+                        userTrades.length > 0
+                          ? "rgba(47,111,237,0.1)"
+                          : "rgba(156,163,175,0.1)",
+                      color: userTrades.length > 0 ? "#2F6FED" : "#9CA3AF",
+                      border: `1px solid ${userTrades.length > 0 ? "rgba(47,111,237,0.2)" : "rgba(156,163,175,0.2)"}`,
+                    }}
+                  >
+                    {loadingTrades
+                      ? "…"
+                      : `${userTrades.length} trade${userTrades.length !== 1 ? "s" : ""}`}
+                    {isExpanded ? (
+                      <ChevronUp className="w-3 h-3" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3" />
+                    )}
+                  </button>
+
+                  {/* Delete */}
+                  <Button
+                    data-ocid={`admin.users.delete_button.${i + 1}`}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      deleteUser(u.uid);
+                      toast.success(`User "${u.username}" deleted.`);
+                    }}
+                    className="text-red-400 hover:text-red-600 h-7 w-7 p-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+
+                {/* Expanded detail panel */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden border-t"
+                      style={{ borderColor: "rgba(11,31,59,0.08)" }}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
+                      <div
+                        className="px-4 py-3 space-y-3"
+                        style={{ background: "rgba(11,31,59,0.02)" }}
+                      >
+                        {/* User detail row */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div
+                            className="rounded-xl p-3"
+                            style={{
+                              background: "rgba(255,255,255,0.8)",
+                              border: "1px solid rgba(11,31,59,0.06)",
+                            }}
+                          >
+                            <p className="text-xs text-gray-400 mb-0.5">
+                              Full UID
+                            </p>
+                            <p className="font-mono text-xs text-navy break-all">
+                              {u.uid}
+                            </p>
+                          </div>
+                          <div
+                            className="rounded-xl p-3"
+                            style={{
+                              background: "rgba(255,255,255,0.8)",
+                              border: "1px solid rgba(11,31,59,0.06)",
+                            }}
+                          >
+                            <p className="text-xs text-gray-400 mb-0.5">
+                              Subscription
+                            </p>
+                            <p className="font-bold text-navy text-sm">
+                              {subTypeLabel(u.subscriptionType)}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              Expires:{" "}
+                              {u.subscriptionExpiry
+                                ? new Date(
+                                    u.subscriptionExpiry,
+                                  ).toLocaleDateString("en-GB")
+                                : "—"}
+                            </p>
+                          </div>
+                          <div
+                            className="rounded-xl p-3"
+                            style={{
+                              background: "rgba(255,255,255,0.8)",
+                              border: "1px solid rgba(11,31,59,0.06)",
+                            }}
+                          >
+                            <p className="text-xs text-gray-400 mb-0.5">
+                              Trade Record
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-green-600 text-sm">
+                                {wins.length}W
+                              </span>
+                              <span className="text-gray-300">/</span>
+                              <span className="font-bold text-red-500 text-sm">
+                                {losses.length}L
+                              </span>
+                              {wins.length + losses.length > 0 && (
+                                <span className="text-xs text-gray-400">
+                                  (
+                                  {Math.round(
+                                    (wins.length /
+                                      (wins.length + losses.length)) *
+                                      100,
+                                  )}
+                                  % WR)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div
+                            className="rounded-xl p-3"
+                            style={{
+                              background: "rgba(255,255,255,0.8)",
+                              border: "1px solid rgba(11,31,59,0.06)",
+                            }}
+                          >
+                            <p className="text-xs text-gray-400 mb-0.5">
+                              Last Login
+                            </p>
+                            <p className="font-medium text-navy text-sm">
+                              {u.lastLogin
+                                ? new Date(u.lastLogin).toLocaleDateString(
+                                    "en-GB",
+                                  )
+                                : "Never"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Tracked trades list */}
+                        {userTrades.length === 0 ? (
+                          <div
+                            className="flex items-center gap-2 py-3 px-3 rounded-xl text-sm text-gray-400"
+                            style={{
+                              background: "rgba(156,163,175,0.06)",
+                              border: "1px dashed rgba(156,163,175,0.2)",
+                            }}
+                          >
+                            <TrendingUp className="w-4 h-4" />
+                            No tracked trades for this user yet.
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <TrendingUp className="w-3.5 h-3.5 text-navy" />
+                              <p className="text-xs font-bold text-navy">
+                                Tracked Trades ({userTrades.length})
+                              </p>
+                              <span
+                                className="ml-auto text-xs"
+                                style={{
+                                  color:
+                                    openTrades.length > 0
+                                      ? "#22C55E"
+                                      : "#9CA3AF",
+                                }}
+                              >
+                                {openTrades.length} open
+                              </span>
+                            </div>
+                            {userTrades.slice(0, 6).map((record, j) => {
+                              const trade = parseTrade(record);
+                              if (!trade) return null;
+                              return (
+                                <div
+                                  key={record.tradeId}
+                                  data-ocid={`admin.users.trade.${j + 1}`}
+                                  className="flex items-center gap-3 px-3 py-2 rounded-lg"
+                                  style={{
+                                    background: "rgba(255,255,255,0.7)",
+                                    border: "1px solid rgba(11,31,59,0.06)",
+                                  }}
+                                >
+                                  <div
+                                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black text-navy flex-shrink-0"
+                                    style={{
+                                      background:
+                                        "linear-gradient(135deg, #F2D27A, #D4AF37)",
+                                    }}
+                                  >
+                                    {trade.symbol.slice(0, 2)}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-bold text-navy text-xs">
+                                        {trade.coinName}
+                                      </p>
+                                      <span
+                                        className="px-1.5 py-0.5 rounded text-xs font-bold"
+                                        style={{
+                                          background:
+                                            trade.direction === "BUY"
+                                              ? "rgba(34,197,94,0.12)"
+                                              : "rgba(239,68,68,0.12)",
+                                          color:
+                                            trade.direction === "BUY"
+                                              ? "#16A34A"
+                                              : "#DC2626",
+                                        }}
+                                      >
+                                        {trade.direction}
+                                      </span>
+                                      {trade.outcome === "win" && (
+                                        <span className="text-xs text-green-600 font-bold">
+                                          ✅ WIN
+                                        </span>
+                                      )}
+                                      {trade.outcome === "loss" && (
+                                        <span className="text-xs text-red-500 font-bold">
+                                          ❌ LOSS
+                                        </span>
+                                      )}
+                                      {(!trade.outcome ||
+                                        trade.outcome === "open") && (
+                                        <span className="text-xs text-blue-500 font-bold">
+                                          ⏳ OPEN
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-gray-400">
+                                      Entry $
+                                      {trade.entryPrice.toLocaleString(
+                                        undefined,
+                                        { maximumFractionDigits: 4 },
+                                      )}{" "}
+                                      • TP $
+                                      {trade.targetPrice.toLocaleString(
+                                        undefined,
+                                        { maximumFractionDigits: 4 },
+                                      )}{" "}
+                                      • SL $
+                                      {trade.stopLoss.toLocaleString(
+                                        undefined,
+                                        { maximumFractionDigits: 4 },
+                                      )}
+                                    </p>
+                                  </div>
+                                  {trade.profitPercent !== undefined && (
+                                    <span
+                                      className="text-xs font-bold whitespace-nowrap"
+                                      style={{
+                                        color:
+                                          trade.profitPercent >= 0
+                                            ? "#22C55E"
+                                            : "#EF4444",
+                                      }}
+                                    >
+                                      {trade.profitPercent >= 0 ? "+" : ""}
+                                      {trade.profitPercent.toFixed(2)}%
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {userTrades.length > 6 && (
+                              <p className="text-xs text-gray-400 text-center py-1">
+                                +{userTrades.length - 6} more trades
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            );
+          })}
         </div>
       )}
 

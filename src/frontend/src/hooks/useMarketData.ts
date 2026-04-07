@@ -548,12 +548,12 @@ export async function quickPreFilter(
     const rsiVals = rsi(closes);
     if (rsiVals.length === 0) return false;
     const lastRsi = rsiVals[rsiVals.length - 1];
-    if (lastRsi < 35 || lastRsi > 75) return false;
+    if (lastRsi < 28 || lastRsi > 80) return false;
 
     // Volume confirmation: last candle volume >= 60% of 20-period average
     const avgVol =
       candles.slice(-21, -1).reduce((s, c) => s + c.volume, 0) / 20;
-    if (candles[candles.length - 1].volume < avgVol * 0.6) return false;
+    if (candles[candles.length - 1].volume < avgVol * 0.4) return false;
 
     return true;
   } catch {
@@ -719,7 +719,7 @@ export async function analyzeSymbol(
 
   // Hard minimum score: 9/15 (raised for higher accuracy)
   // Note: golden cross is a hard gate, not a score point (it already filters ~70% of coins)
-  if (score < 7) return null;
+  if (score < 8) return null;
 
   // ── Confidence calculation ──────────────────────────────────────────────────
   let confidence = Math.round(65 + (score / 15) * 30); // 65-95 base range
@@ -771,6 +771,14 @@ export async function analyzeSymbol(
   else if (bosConfirmed) entryType = "Break of Structure";
   else if (macdCrossover1h) entryType = "MACD Crossover Entry";
   else if (supportZone) entryType = "Support Zone Entry";
+
+  // FINAL GATE: Do not buy at the top of a 4H move
+  // If current price is within 3% of the 50-candle high on 4H, reject
+  if (candles4h.length >= 50) {
+    const high4h50 = Math.max(...candles4h.slice(-50).map((c) => c.high));
+    const pctFromHigh4h = ((high4h50 - currentPrice) / high4h50) * 100;
+    if (pctFromHigh4h < 3) return null;
+  }
 
   const analysis = `Bullish setup | ${trendCount}/3 TF aligned. 4H: ${trend4h}, 1H: ${trend1h}, 15M: ${trend15m}. RSI(1h): ${curRsi1h.toFixed(1)} | RSI(4h): ${curRsi4h.toFixed(1)}. MACD(1h): ${macdAligned1h ? (macdCrossover1h ? "fresh crossover ✓" : "aligned ✓") : "not aligned"}. ${bosConfirmed ? "BoS 15m ✓" : ""} ${volumeSpike ? "Vol spike ✓" : ""} ${goldenCross ? "Golden Cross ✓" : ""} ${supportZone ? "Support zone ✓" : ""}. Entry: ${entryType}. Score: ${score}/15. RR: 1:${rrRatio}.`;
 

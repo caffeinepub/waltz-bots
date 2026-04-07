@@ -1,10 +1,13 @@
 import { CoinCategory, MarketSentiment, PostCategory } from "@/backend";
-import type {
-  MarketStatus,
-  NewsPost,
-  ScanReport,
-  TrendingCoin,
-} from "@/backend";
+import type { MarketStatus, NewsPost, TrendingCoin } from "@/backend";
+
+// ScanReport defined locally (removed from backend)
+interface ScanReport {
+  totalCoinsScanned: bigint;
+  totalSignalsGenerated: bigint;
+  activeSignalsCount: bigint;
+  winRate: number;
+}
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -1036,7 +1039,7 @@ export function HomePage({
   // Backend TrendingCoin type used only when backend provides data
   const [backendCoins, setBackendCoins] = useState<TrendingCoin[]>([]);
   const [news, setNews] = useState<NewsPost[]>(MOCK_NEWS);
-  const [scanReport, setScanReport] = useState<ScanReport>(MOCK_SCAN);
+  const [scanReport, _setScanReport] = useState<ScanReport>(MOCK_SCAN);
   const [_marketStatus, setMarketStatus] = useState<MarketStatus>(MOCK_MARKET);
 
   // Global market data (CoinGecko + Fear & Greed)
@@ -1096,10 +1099,9 @@ export function HomePage({
     Promise.all([
       actor.getAllTrendingCoins(),
       actor.getAllNewsPosts(),
-      actor.getScanReport(),
       actor.getMarketStatus(),
     ])
-      .then(([coins, newsPosts, scan, market]) => {
+      .then(([coins, newsPosts, market]) => {
         if (coins.length > 0) {
           const trending = coins.filter(
             (c) => c.category === CoinCategory.trending,
@@ -1110,7 +1112,6 @@ export function HomePage({
           setNews(
             newsPosts.filter((p) => p.postCategory === PostCategory.news),
           );
-        setScanReport(scan);
         setMarketStatus(market);
       })
       .catch(() => {

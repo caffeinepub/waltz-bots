@@ -36,12 +36,6 @@ export interface NewsPost {
 }
 export type PostCategory = { 'news' : null } |
   { 'post' : null };
-export interface ScanReport {
-  'totalSignalsGenerated' : bigint,
-  'activeSignalsCount' : bigint,
-  'winRate' : number,
-  'totalCoinsScanned' : bigint,
-}
 export type SignalStatus = { 'active' : null } |
   { 'cancelled' : null } |
   { 'completed' : null };
@@ -49,6 +43,12 @@ export type SubscriptionStatus = { 'trial' : null } |
   { 'active' : null } |
   { 'expired' : null };
 export type Time = bigint;
+export interface TrackedTradeRecord {
+  'uid' : string,
+  'tradeJson' : string,
+  'updatedAt' : Time,
+  'tradeId' : string,
+}
 export interface TradingSignal {
   'direction' : Direction,
   'targetPrice' : number,
@@ -66,6 +66,13 @@ export interface TrendingCoin {
   'category' : CoinCategory,
   'symbol' : string,
 }
+export interface UserCredential {
+  'uid' : string,
+  'username' : string,
+  'createdAt' : Time,
+  'subscriptionType' : string,
+  'passwordHash' : string,
+}
 export interface UserProfile {
   'status' : SubscriptionStatus,
   'username' : string,
@@ -81,42 +88,29 @@ export interface _SERVICE {
   'addTradingSignal' : ActorMethod<[TradingSignal], undefined>,
   'addTrendingCoin' : ActorMethod<[TrendingCoin], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
+  'deleteTrackedTrade' : ActorMethod<[string], undefined>,
+  'deleteUserCredential' : ActorMethod<[string], undefined>,
   'getAllAppUserProfiles' : ActorMethod<[], Array<AppUserProfile>>,
   'getAllNewsPosts' : ActorMethod<[], Array<NewsPost>>,
+  'getAllTrackedTrades' : ActorMethod<[], Array<TrackedTradeRecord>>,
   'getAllTradingSignals' : ActorMethod<[], Array<TradingSignal>>,
   'getAllTrendingCoins' : ActorMethod<[], Array<TrendingCoin>>,
+  'getAllUserCredentials' : ActorMethod<[], Array<UserCredential>>,
   'getAppUserProfile' : ActorMethod<[string], [] | [AppUserProfile]>,
-  'getAppUserProfilesByStatus' : ActorMethod<
-    [SubscriptionStatus],
-    Array<AppUserProfile>
-  >,
-  'getAppUserProfilesBySubscriptionExpiry' : ActorMethod<
-    [],
-    Array<AppUserProfile>
-  >,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getMarketStatus' : ActorMethod<[], MarketStatus>,
   'getNewsPost' : ActorMethod<[string], [] | [NewsPost]>,
-  'getNewsPostsByCategory' : ActorMethod<[PostCategory], Array<NewsPost>>,
-  'getNewsPostsByTimestamp' : ActorMethod<[], Array<NewsPost>>,
-  'getScanReport' : ActorMethod<[], ScanReport>,
+  'getTrackedTradesForUser' : ActorMethod<[string], Array<TrackedTradeRecord>>,
   'getTradingSignal' : ActorMethod<[string], [] | [TradingSignal]>,
-  'getTradingSignalsByCoinName' : ActorMethod<[], Array<TradingSignal>>,
-  'getTradingSignalsByStatus' : ActorMethod<
-    [SignalStatus],
-    Array<TradingSignal>
-  >,
-  'getTradingSignalsByTimestamp' : ActorMethod<[], Array<TradingSignal>>,
   'getTrendingCoin' : ActorMethod<[string], [] | [TrendingCoin]>,
-  'getTrendingCoinsByCategory' : ActorMethod<
-    [CoinCategory],
-    Array<TrendingCoin>
-  >,
-  'getTrendingCoinsByPrice' : ActorMethod<[], Array<TrendingCoin>>,
+  'getUserCredentialByUid' : ActorMethod<[string], [] | [UserCredential]>,
+  'getUserCredentialByUsername' : ActorMethod<[string], [] | [UserCredential]>,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'saveTrackedTrade' : ActorMethod<[TrackedTradeRecord], undefined>,
+  'saveUserCredential' : ActorMethod<[UserCredential], undefined>,
   'updateMarketStatus' : ActorMethod<[MarketStatus], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;

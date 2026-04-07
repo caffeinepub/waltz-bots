@@ -1,3 +1,4 @@
+import type { Direction, SignalStatus } from "@/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
 import { type LiveSignal, useSignalScan } from "@/context/SignalScanContext";
+import { useActor } from "@/hooks/useActor";
 import { analyzeSymbol, useLivePrices } from "@/hooks/useMarketData";
 import {
   Activity,
@@ -535,6 +537,7 @@ export function SignalsPage({
   onTabChange?: (tab: string) => void;
 }) {
   const { user } = useAuth();
+  const { actor } = useActor();
   const storageKey = user ? `wb_tracked_${user.uid}` : "wb_tracked_guest";
 
   const [filter, setFilter] = useState<FilterType>("All");
@@ -616,7 +619,7 @@ export function SignalsPage({
     }
   };
 
-  const handleTrack = (signal: LiveSignal) => {
+  const handleTrack = async (signal: LiveSignal) => {
     try {
       const saved = localStorage.getItem(storageKey);
       const existing = saved ? JSON.parse(saved) : [];
@@ -635,6 +638,24 @@ export function SignalsPage({
       const updated = [trackedEntry, ...existing];
       localStorage.setItem(storageKey, JSON.stringify(updated));
       setTrackedSymbols((prev) => new Set([...prev, signal.symbol]));
+
+      // Persist to cloud
+      if (actor) {
+        try {
+          await actor.addTradingSignal({
+            coinName: signal.symbol,
+            direction: "buy" as unknown as Direction,
+            entryPrice: signal.entryPrice,
+            targetPrice: signal.targetPrice,
+            stopLoss: signal.stopLoss,
+            timestamp: BigInt(Date.now() * 1_000_000),
+            signalStatus: "active" as unknown as SignalStatus,
+          });
+        } catch {
+          // Cloud save failed — signal still tracked locally
+        }
+      }
+
       toast.success(`${signal.coinName} added to tracking!`);
       setTimeout(() => onTabChange?.("tracking"), 800);
     } catch {
