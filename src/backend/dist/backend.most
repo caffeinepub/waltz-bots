@@ -1,0 +1,131 @@
+// Version: 1.0.0
+type AppUserProfile__787321490 =
+  {
+    status : SubscriptionStatus__278950313;
+    subscriptionExpiry : Time__900049286;
+    uid : Text;
+    username : Text
+  };
+type CoinCategory__32831175 = {#hundredX; #trending};
+type Data__791452850<K, V> =
+  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type Direction__341175329 = {#buy; #sell};
+type Int__270357528 = Int__616954475;
+type Int__616954475 = Int;
+type Internal__8484328<K, V> =
+  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
+type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
+type Map__158565046<K, V> = Map__297112838<K, V>;
+type Map__297112838<K, V> =
+  {var root : Node__46230540<K, V>; var size : Nat__490723111};
+type Map__605269027<K, V> = Map__158565046<K, V>;
+type MarketSentiment__248054036 = {#bearish; #bullish; #neutral};
+type Nat__490723111 = Nat__920180692;
+type Nat__920180692 = Nat;
+type NewsPost__136774649 =
+  {
+    contentSummary : Text;
+    postCategory : PostCategory__283381575;
+    timestamp : Time__900049286;
+    title : Text
+  };
+type Node__46230540<K, V> =
+  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+type PostCategory__283381575 = {#news; #post};
+type SignalStatus__642343521 = {#active; #cancelled; #completed};
+type SubscriptionStatus__278950313 = {#active; #expired; #trial};
+type Time__796480547 = Int__270357528;
+type Time__900049286 = Time__796480547;
+type TrackedTradeRecord__60420148 =
+  {tradeId : Text; tradeJson : Text; uid : Text; updatedAt : Time__900049286};
+type TradingSignal__1027477684 =
+  {
+    coinName : Text;
+    direction : Direction__341175329;
+    entryPrice : Float;
+    signalStatus : SignalStatus__642343521;
+    stopLoss : Float;
+    targetPrice : Float;
+    timestamp : Time__900049286
+  };
+type TrendingCoin__583579492 =
+  {
+    category : CoinCategory__32831175;
+    change24h : Float;
+    currentPrice : Float;
+    name : Text;
+    predictedTarget : Float;
+    symbol : Text
+  };
+type UserCredential__148221174 =
+  {
+    createdAt : Time__900049286;
+    passwordHash : Text;
+    subscriptionType : Text;
+    uid : Text;
+    username : Text
+  };
+type UserProfile__491224006 =
+  {
+    status : SubscriptionStatus__278950313;
+    subscriptionExpiry : Time__900049286;
+    username : Text
+  };
+type UserRole__1054455867 = {#admin; #guest; #user};
+actor {
+  stable accessControlState :
+    {
+      var adminAssigned : Bool;
+      userRoles : Map__605269027<Principal, UserRole__1054455867>
+    };
+  stable appUserProfiles :
+    {
+      var root : Node__46230540<Text, AppUserProfile__787321490>;
+      var size : Nat__490723111
+    };
+  stable var marketStatus :
+    {
+      btcDominance : Float;
+      marketCap : Float;
+      sentiment : MarketSentiment__248054036
+    };
+  stable newsPosts :
+    {
+      var root : Node__46230540<Text, NewsPost__136774649>;
+      var size : Nat__490723111
+    };
+  stable scanReport :
+    {
+      activeSignalsCount : Nat;
+      totalCoinsScanned : Nat;
+      totalSignalsGenerated : Nat;
+      winRate : Float
+    };
+  stable trackedTrades :
+    {
+      var root : Node__46230540<Text, TrackedTradeRecord__60420148>;
+      var size : Nat__490723111
+    };
+  stable tradingSignals :
+    {
+      var root : Node__46230540<Text, TradingSignal__1027477684>;
+      var size : Nat__490723111
+    };
+  stable trendingCoins :
+    {
+      var root : Node__46230540<Text, TrendingCoin__583579492>;
+      var size : Nat__490723111
+    };
+  stable userCredentials :
+    {
+      var root : Node__46230540<Text, UserCredential__148221174>;
+      var size : Nat__490723111
+    };
+  stable userProfiles :
+    {
+      var root : Node__46230540<Principal, UserProfile__491224006>;
+      var size : Nat__490723111
+    };
+  stable usernameToUid :
+    {var root : Node__46230540<Text, Text>; var size : Nat__490723111}
+};

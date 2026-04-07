@@ -44,7 +44,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { TrackedTradeRecord } from "../backend";
+import type { TrackedTradeRecord } from "../hooks/useActor";
 import { AIDashboardPage } from "./AIDashboardPage";
 import type { FeedbackItem } from "./FeedbackPage";
 

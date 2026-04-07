@@ -4,11 +4,11 @@ import Time "mo:core/Time";
 import Text "mo:core/Text";
 import Runtime "mo:core/Runtime";
 import Principal "mo:core/Principal";
-import AccessControl "authorization/access-control";
-import MixinAuthorization "authorization/MixinAuthorization";
-import Migration "migration";
+import AccessControl "mo:caffeineai-authorization/access-control";
+import MixinAuthorization "mo:caffeineai-authorization/MixinAuthorization";
 
-(with migration = Migration.run)
+
+
 actor {
   // Include authentication mixin.
   let accessControlState = AccessControl.initState();

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/AuthContext";
 import { useNotifications } from "@/context/NotificationContext";
 import { useActor } from "@/hooks/useActor";
+import type { TrackedTradeRecord } from "@/hooks/useActor";
 import { liveReanalysis, useLivePrices } from "@/hooks/useMarketData";
 import { type LiveSignal, SCAN_SYMBOLS } from "@/hooks/useSignals";
 import {
@@ -26,7 +27,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { TrackedTradeRecord } from "../backend";
+// TrackedTradeRecord imported from useActor above
 
 // TrackedTrade extends LiveSignal with tracking-specific fields
 interface TrackedTrade extends LiveSignal {

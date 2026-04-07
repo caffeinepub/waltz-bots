@@ -82,7 +82,7 @@ export type UserRole = { 'admin' : null } |
   { 'user' : null } |
   { 'guest' : null };
 export interface _SERVICE {
-  '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
+  '_initializeAccessControl' : ActorMethod<[], undefined>,
   'addAppUserProfile' : ActorMethod<[AppUserProfile], undefined>,
   'addNewsPost' : ActorMethod<[NewsPost], undefined>,
   'addTradingSignal' : ActorMethod<[TradingSignal], undefined>,

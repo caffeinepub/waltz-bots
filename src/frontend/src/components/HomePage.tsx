@@ -1,13 +1,3 @@
-import { CoinCategory, MarketSentiment, PostCategory } from "@/backend";
-import type { MarketStatus, NewsPost, TrendingCoin } from "@/backend";
-
-// ScanReport defined locally (removed from backend)
-interface ScanReport {
-  totalCoinsScanned: bigint;
-  totalSignalsGenerated: bigint;
-  activeSignalsCount: bigint;
-  winRate: number;
-}
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +28,51 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { HeroSection } from "./HeroSection";
 import { StackedCarousel } from "./StackedCarousel";
+
+// Local type definitions (backend doesn't export these)
+export const CoinCategory = {
+  trending: "trending",
+  hot: "hot",
+  new: "new",
+} as const;
+export const MarketSentiment = {
+  bullish: "bullish",
+  bearish: "bearish",
+  neutral: "neutral",
+} as const;
+export const PostCategory = {
+  news: "news",
+  post: "post",
+  analysis: "analysis",
+} as const;
+export interface NewsPost {
+  title: string;
+  postCategory: string;
+  timestamp: bigint;
+  contentSummary: string;
+}
+export interface TrendingCoin {
+  symbol: string;
+  name: string;
+  category: string;
+  priceUsd: number;
+  currentPrice?: number;
+  change24h?: number;
+  predictedTarget?: number;
+}
+export interface MarketStatus {
+  sentiment: string;
+  btcDominance: number;
+  marketCap: number;
+}
+
+// ScanReport defined locally (removed from backend)
+interface ScanReport {
+  totalCoinsScanned: bigint;
+  totalSignalsGenerated: bigint;
+  activeSignalsCount: bigint;
+  winRate: number;
+}
 
 // ─── Mock data ─────────────────────────────────────────────────────
 
@@ -608,7 +643,7 @@ function LegacyTrendingCoinCard({
 }: { coin: TrendingCoin; livePrice: number; liveChange: number }) {
   const isUp = liveChange >= 0;
   const multiplier =
-    livePrice > 0 ? (coin.predictedTarget / livePrice).toFixed(1) : "—";
+    livePrice > 0 ? ((coin.predictedTarget ?? 0) / livePrice).toFixed(1) : "—";
   return (
     <div
       className="flex-shrink-0 rounded-2xl p-3 cursor-pointer transition-all hover:-translate-y-1"
@@ -644,7 +679,7 @@ function LegacyTrendingCoinCard({
         {isUp ? "↑" : "↓"} {Math.abs(liveChange).toFixed(2)}%
       </p>
       <p className="text-xs text-gold mt-1">
-        Target: {formatPrice(coin.predictedTarget)}
+        Target: {formatPrice(coin.predictedTarget ?? 0)}
       </p>
       <div
         className="mt-1 px-1.5 py-0.5 rounded-full text-center text-xs font-bold"
@@ -1112,7 +1147,7 @@ export function HomePage({
           setNews(
             newsPosts.filter((p) => p.postCategory === PostCategory.news),
           );
-        setMarketStatus(market);
+        setMarketStatus(market ?? MOCK_MARKET);
       })
       .catch(() => {
         /* fallback to mock */
@@ -1681,7 +1716,9 @@ export function HomePage({
                           AI Target
                         </p>
                         <p className="text-green-400 font-bold">
-                          {formatPrice(selectedTrendingCoin.predictedTarget)}
+                          {formatPrice(
+                            selectedTrendingCoin.predictedTarget ?? 0,
+                          )}
                         </p>
                       </div>
                       <div
@@ -1705,7 +1742,7 @@ export function HomePage({
                         <p className="text-gold/70 text-xs mb-1">Multiplier</p>
                         <p className="text-gold font-bold">
                           {(
-                            selectedTrendingCoin.predictedTarget / liveP
+                            (selectedTrendingCoin.predictedTarget ?? 0) / liveP
                           ).toFixed(1)}
                           x
                         </p>
@@ -1730,11 +1767,11 @@ export function HomePage({
                         strong market momentum. Live price data from Binance
                         shows {liveC >= 0 ? "positive" : "negative"} 24h
                         movement. AI target at{" "}
-                        {formatPrice(selectedTrendingCoin.predictedTarget)}{" "}
+                        {formatPrice(selectedTrendingCoin.predictedTarget ?? 0)}{" "}
                         represents a{" "}
-                        {(selectedTrendingCoin.predictedTarget / liveP).toFixed(
-                          1,
-                        )}
+                        {(
+                          (selectedTrendingCoin.predictedTarget ?? 0) / liveP
+                        ).toFixed(1)}
                         x potential from current levels.
                       </p>
                     </div>

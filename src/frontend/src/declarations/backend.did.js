@@ -92,7 +92,7 @@ export const MarketStatus = IDL.Record({
 });
 
 export const idlService = IDL.Service({
-  '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+  '_initializeAccessControl' : IDL.Func([], [], []),
   'addAppUserProfile' : IDL.Func([AppUserProfile], [], []),
   'addNewsPost' : IDL.Func([NewsPost], [], []),
   'addTradingSignal' : IDL.Func([TradingSignal], [], []),
@@ -236,7 +236,7 @@ export const idlFactory = ({ IDL }) => {
   });
   
   return IDL.Service({
-    '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+    '_initializeAccessControl' : IDL.Func([], [], []),
     'addAppUserProfile' : IDL.Func([AppUserProfile], [], []),
     'addNewsPost' : IDL.Func([NewsPost], [], []),
     'addTradingSignal' : IDL.Func([TradingSignal], [], []),

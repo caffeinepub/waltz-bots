@@ -1,4 +1,6 @@
-import type { Direction, SignalStatus } from "@/backend";
+// Local type aliases — backend doesn't export these
+type Direction = string;
+type SignalStatus = string;
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +12,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { type LiveSignal, useSignalScan } from "@/context/SignalScanContext";
 import { useActor } from "@/hooks/useActor";
-import { analyzeSymbol, useLivePrices } from "@/hooks/useMarketData";
+import { deepTestSignal, useLivePrices } from "@/hooks/useMarketData";
 import {
   Activity,
   BookmarkPlus,
@@ -306,6 +308,56 @@ function SignalCard({
               Support Zone ✓
             </span>
           )}
+          {(signal as LiveSignal & { ichimokuBullish?: boolean })
+            .ichimokuBullish && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(168,85,247,0.12)",
+                color: "#A855F7",
+                border: "1px solid rgba(168,85,247,0.25)",
+              }}
+            >
+              Ichimoku ✓
+            </span>
+          )}
+          {(signal as LiveSignal & { stochRsiBullish?: boolean })
+            .stochRsiBullish && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(20,184,166,0.12)",
+                color: "#14B8A6",
+                border: "1px solid rgba(20,184,166,0.25)",
+              }}
+            >
+              StochRSI ✓
+            </span>
+          )}
+          {(signal as LiveSignal & { obvRising?: boolean }).obvRising && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(249,115,22,0.12)",
+                color: "#F97316",
+                border: "1px solid rgba(249,115,22,0.25)",
+              }}
+            >
+              OBV ↑ ✓
+            </span>
+          )}
+          {(signal as LiveSignal & { fibLevel?: string }).fibLevel && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full font-semibold"
+              style={{
+                background: "rgba(236,72,153,0.12)",
+                color: "#EC4899",
+                border: "1px solid rgba(236,72,153,0.25)",
+              }}
+            >
+              {(signal as LiveSignal & { fibLevel?: string }).fibLevel} ✓
+            </span>
+          )}
         </div>
 
         {/* Progress bar */}
@@ -578,7 +630,6 @@ export function SignalsPage({
     if (testedIds.has(signal.id)) return;
 
     setTestingId(signal.id);
-    // Clear any previous test result for this signal
     setTestResults((prev) => {
       const copy = { ...prev };
       delete copy[signal.id];
@@ -587,27 +638,33 @@ export function SignalsPage({
 
     try {
       const livePrice = livePrices[signal.symbol]?.price ?? signal.currentPrice;
-      const result = await analyzeSymbol(signal.symbol, livePrice);
+      const result = await deepTestSignal(
+        signal.symbol,
+        {
+          entryPrice: signal.entryPrice,
+          stopLoss: signal.stopLoss,
+          targetPrice: signal.targetPrice,
+          confidence: signal.confidence,
+          score: (signal as LiveSignal & { score?: number }).score ?? 22,
+        },
+        livePrice,
+      );
 
-      if (
-        result &&
-        result.direction === signal.direction &&
-        result.confidence >= 75
-      ) {
-        // Signal passed — lock it as tested and show VERIFIED confirmation
+      if (result.passed) {
+        // Signal passed — lock it as tested
         setTestedIds((prev) => new Set([...prev, signal.id]));
         setTestResults((prev) => ({
           ...prev,
           [signal.id]: {
             passed: true,
-            details: `✅ VERIFIED: Signal passed all tests (4H+1H trend alignment, MACD crossover, BoS, volume confirmed). Confidence: ${result.confidence}%. Entry type: ${result.entryType ?? "Confirmed"}. This signal is highly likely to hit TP.`,
+            details: result.details,
           },
         }));
       } else {
-        // Signal failed verification — drop it from the list entirely, show no warning
+        // Signal failed — drop it from the list entirely
         setDroppedIds((prev) => new Set([...prev, signal.id]));
         toast.error(
-          `${signal.coinName} dropped — failed full TP verification.`,
+          `${signal.coinName} dropped — failed deep TP verification.`,
         );
       }
     } catch {
@@ -792,12 +849,13 @@ export function SignalsPage({
             Scanning and verifying signals...
           </p>
           <p className="text-gray-400 text-sm text-center">
-            Scanning {scannedCount} / {totalSymbols} Binance pairs —
-            quick-filtering by volume &amp; momentum, then running full RSI,
-            MACD, EMA, Golden Cross, Support Zone analysis on top candidates
+            Scanning {scannedCount} / {totalSymbols} Binance pairs — filtering
+            by volume &amp; momentum, then running 30-indicator deep analysis
+            (EMA 20/50/100/200, ADX, Ichimoku, StochRSI, OBV, VWAP, BoS, FVG,
+            Order Blocks, Fibonacci, Pivot Points + 5 timeframes)
           </p>
           <p className="text-xs text-gray-400">
-            Only signals that pass ALL verification checks will be shown
+            Only signals passing ALL 10 hard gates + 26/30 score will appear
           </p>
           <div className="w-48 bg-gray-100 rounded-full h-1.5 mt-2">
             <div

@@ -5,8 +5,8 @@ import {
   useEffect,
   useState,
 } from "react";
-import type { AppUserProfile, SubscriptionStatus } from "../backend";
 import { useActor } from "../hooks/useActor";
+import type { AppUserProfile, SubscriptionStatus } from "../hooks/useActor";
 
 export interface WBUser {
   username: string;

@@ -1,0 +1,132 @@
+type UserRole = 
+ variant {
+   admin;
+   guest;
+   user;
+ };
+type UserProfile = 
+ record {
+   status: SubscriptionStatus;
+   subscriptionExpiry: Time;
+   username: text;
+ };
+type UserCredential = 
+ record {
+   createdAt: Time;
+   passwordHash: text;
+   subscriptionType: text;
+   uid: text;
+   username: text;
+ };
+type TrendingCoin = 
+ record {
+   category: CoinCategory;
+   change24h: float64;
+   currentPrice: float64;
+   name: text;
+   predictedTarget: float64;
+   symbol: text;
+ };
+type TradingSignal = 
+ record {
+   coinName: text;
+   direction: Direction;
+   entryPrice: float64;
+   signalStatus: SignalStatus;
+   stopLoss: float64;
+   targetPrice: float64;
+   timestamp: Time;
+ };
+type TrackedTradeRecord = 
+ record {
+   tradeId: text;
+   tradeJson: text;
+   uid: text;
+   updatedAt: Time;
+ };
+type Time = int;
+type SubscriptionStatus = 
+ variant {
+   active;
+   expired;
+   trial;
+ };
+type SignalStatus = 
+ variant {
+   active;
+   cancelled;
+   completed;
+ };
+type PostCategory = 
+ variant {
+   news;
+   post;
+ };
+type NewsPost = 
+ record {
+   contentSummary: text;
+   postCategory: PostCategory;
+   timestamp: Time;
+   title: text;
+ };
+type MarketStatus = 
+ record {
+   btcDominance: float64;
+   marketCap: float64;
+   sentiment: MarketSentiment;
+ };
+type MarketSentiment = 
+ variant {
+   bearish;
+   bullish;
+   neutral;
+ };
+type Direction = 
+ variant {
+   buy;
+   sell;
+ };
+type CoinCategory = 
+ variant {
+   hundredX;
+   trending;
+ };
+type AppUserProfile = 
+ record {
+   status: SubscriptionStatus;
+   subscriptionExpiry: Time;
+   uid: text;
+   username: text;
+ };
+service : {
+  _initializeAccessControl: () -> ();
+  addAppUserProfile: (profile: AppUserProfile) -> ();
+  addNewsPost: (post: NewsPost) -> ();
+  addTradingSignal: (signal: TradingSignal) -> ();
+  addTrendingCoin: (coin: TrendingCoin) -> ();
+  assignCallerUserRole: (user: principal, role: UserRole) -> ();
+  deleteTrackedTrade: (tradeId: text) -> ();
+  deleteUserCredential: (uid: text) -> ();
+  getAllAppUserProfiles: () -> (vec AppUserProfile) query;
+  getAllNewsPosts: () -> (vec NewsPost) query;
+  getAllTrackedTrades: () -> (vec TrackedTradeRecord) query;
+  getAllTradingSignals: () -> (vec TradingSignal) query;
+  getAllTrendingCoins: () -> (vec TrendingCoin) query;
+  getAllUserCredentials: () -> (vec UserCredential) query;
+  getAppUserProfile: (uid: text) -> (opt AppUserProfile) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getCallerUserRole: () -> (UserRole) query;
+  getMarketStatus: () -> (MarketStatus) query;
+  getNewsPost: (title: text) -> (opt NewsPost) query;
+  getTrackedTradesForUser: (uid: text) -> (vec TrackedTradeRecord) query;
+  getTradingSignal: (coinName: text) -> (opt TradingSignal) query;
+  getTrendingCoin: (name: text) -> (opt TrendingCoin) query;
+  getUserCredentialByUid: (uid: text) -> (opt UserCredential) query;
+  getUserCredentialByUsername: (username: text) -> (opt UserCredential) query;
+  getUserProfile: (user: principal) -> (opt UserProfile) query;
+  isCallerAdmin: () -> (bool) query;
+  saveCallerUserProfile: (profile: UserProfile) -> ();
+  saveTrackedTrade: ("record": TrackedTradeRecord) -> ();
+  saveUserCredential: (cred: UserCredential) -> ();
+  updateMarketStatus: (status: MarketStatus) -> ();
+}
