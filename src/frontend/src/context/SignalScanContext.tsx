@@ -5,12 +5,12 @@
  * 1. Fetch ALL active USDT pairs from Binance exchangeInfo (~1800+ pairs)
  * 2. Fetch ALL 24h tickers in ONE API call (no per-coin requests)
  * 3. Pre-filter by volume (>$5M 24h) — typically cuts to ~200-400 candidates
- * 4. Quick trend pre-filter per candidate (50 1h candles) — cuts to ~50-100
+ * 4. Quick trend pre-filter per candidate (60 1h candles, relaxed RSI only) — cuts to ~150-250
  * 5. Full multi-layer analysis on pre-filtered coins only
- * 6. Only coins passing ALL 15 accuracy gates appear as signals
+ * 6. Signals with score 16/30+, 72%+ confidence, and 3+ secondary gates appear
+ * 7. Signals expire silently after 8 hours if TP not hit
  *
- * This gives breadth (all 1800+ coins checked) with speed (only ~50-100 get full analysis)
- * and accuracy (15 hard gates + 82% confidence minimum).
+ * This gives breadth (all 1800+ coins checked) with accuracy (multi-gate system).
  */
 import {
   createContext,
@@ -59,7 +59,8 @@ export interface LiveSignal {
   supportZone: boolean;
 }
 
-const RESCAN_INTERVAL = 300; // 5 minutes (full 1800-coin scan takes time)
+const RESCAN_INTERVAL = 300; // 5 minutes
+const SIGNAL_EXPIRY_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 interface SignalScanContextType {
   signals: LiveSignal[];
@@ -213,9 +214,13 @@ export function SignalScanProvider({
               goldenCross: analysis.goldenCross,
               supportZone: analysis.supportZone,
             };
-            // Stream: add signal immediately, sorted by confidence descending
+            // Stream: add signal immediately, sorted by profit % descending then confidence
             setSignals((prev) =>
-              [...prev, signal].sort((a, b) => b.confidence - a.confidence),
+              [...prev, signal].sort(
+                (a, b) =>
+                  b.profitPercent - a.profitPercent ||
+                  b.confidence - a.confidence,
+              ),
             );
           }
         } catch {
@@ -249,6 +254,17 @@ export function SignalScanProvider({
     }, RESCAN_INTERVAL * 1000);
     return () => clearInterval(id);
   }, [runScan]);
+
+  // Signal expiry: remove signals older than 8 hours every minute
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      setSignals((prev) =>
+        prev.filter((s) => now - s.generatedAt < SIGNAL_EXPIRY_MS),
+      );
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Cleanup
   useEffect(() => {
