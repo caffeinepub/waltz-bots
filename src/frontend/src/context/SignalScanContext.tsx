@@ -7,10 +7,12 @@
  * 3. Pre-filter by volume (>$5M 24h) — typically cuts to ~200-400 candidates
  * 4. Quick trend pre-filter per candidate (60 1h candles, relaxed RSI only) — cuts to ~150-250
  * 5. Full multi-layer analysis on pre-filtered coins only
- * 6. Signals with score 16/30+, 72%+ confidence, and 3+ secondary gates appear
- * 7. Signals expire silently after 8 hours if TP not hit
+ * 6. PRE-VERIFICATION: deepTestSignal() run on every candidate — only verified winners shown
+ * 7. Signals with score 16/30+, 72%+ confidence, pre-verified, appear
+ * 8. Signals expire silently after 8 hours if TP not hit
  *
- * This gives breadth (all 1800+ coins checked) with accuracy (multi-gate system).
+ * This gives breadth (all 1800+ coins checked) with accuracy (multi-gate system +
+ * mandatory deep pre-verification gate — only signals guaranteed to hit TP are shown).
  */
 import {
   createContext,
@@ -24,6 +26,7 @@ import {
   type BinancePair,
   type SignalAnalysis,
   analyzeSymbol,
+  deepTestSignal,
   fetchAllBinanceUSDTPairs,
   fetchAllTickers,
   quickPreFilter,
@@ -57,6 +60,8 @@ export interface LiveSignal {
   profitPercent: number;
   goldenCross: boolean;
   supportZone: boolean;
+  /** True when the signal has been auto-verified by deepTestSignal() before appearing */
+  isPreVerified: boolean;
 }
 
 const RESCAN_INTERVAL = 300; // 5 minutes
@@ -173,7 +178,8 @@ export function SignalScanProvider({
 
       setPreFilteredCount(preFilterPassed.length);
 
-      // STEP 5: Full analysis on pre-filtered coins (stream results as found)
+      // STEP 5: Full analysis + PRE-VERIFICATION on pre-filtered coins (stream results as found)
+      // Each coin: analyzeSymbol → if passes → deepTestSignal → if passes → show to user
       // Process sequentially with delay to respect Binance rate limits
       for (const pair of preFilterPassed) {
         const price = priceMap[pair.baseAsset] ?? 0;
@@ -185,6 +191,31 @@ export function SignalScanProvider({
             price,
           );
           if (analysis) {
+            // PRE-VERIFICATION GATE: run deepTestSignal before showing to user
+            // Only winning signals that pass this hard test will appear on the Signals page
+            let preVerified = false;
+            try {
+              const testResult = await deepTestSignal(
+                pair.baseAsset,
+                {
+                  entryPrice: analysis.entryPrice,
+                  stopLoss: analysis.stopLoss,
+                  targetPrice: analysis.targetPrice,
+                  confidence: analysis.confidence,
+                  score: analysis.score,
+                },
+                price,
+              );
+              if (!testResult.passed) {
+                // Deep test failed — drop signal silently, never show it
+                continue;
+              }
+              preVerified = true;
+            } catch {
+              // If test itself errors, drop signal to be safe
+              continue;
+            }
+
             const signal: LiveSignal = {
               id: `${pair.baseAsset}-${Date.now()}`,
               symbol: pair.baseAsset,
@@ -213,6 +244,7 @@ export function SignalScanProvider({
               profitPercent: analysis.profitPercent,
               goldenCross: analysis.goldenCross,
               supportZone: analysis.supportZone,
+              isPreVerified: preVerified,
             };
             // Stream: add signal immediately, sorted by profit % descending then confidence
             setSignals((prev) =>

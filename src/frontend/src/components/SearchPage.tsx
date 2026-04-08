@@ -297,6 +297,7 @@ export function SearchPage() {
           profitPercent: analysis.profitPercent,
           goldenCross: analysis.goldenCross,
           supportZone: analysis.supportZone,
+          isPreVerified: false,
         };
         setResults([sig]);
         setMsgs([

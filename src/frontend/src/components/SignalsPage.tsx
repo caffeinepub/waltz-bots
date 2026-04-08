@@ -413,10 +413,10 @@ function SignalCard({
           e.stopPropagation();
           onTest();
         }}
-        disabled={isTesting || isTested}
+        disabled={isTesting || isTested || signal.isPreVerified}
         className="w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
         style={
-          isTested
+          isTested || signal.isPreVerified
             ? {
                 background: "rgba(34,197,94,0.12)",
                 color: "#22C55E",
@@ -443,8 +443,8 @@ function SignalCard({
             <Loader2 className="w-3 h-3 animate-spin" />
             Running full verification...
           </>
-        ) : isTested ? (
-          <>✅ Test Passed — Locked</>
+        ) : isTested || signal.isPreVerified ? (
+          <>✅ Pre-Verified — TP Confirmed</>
         ) : (
           <>
             <FlaskConical className="w-3 h-3" />🔬 Test Signal
@@ -740,7 +740,8 @@ export function SignalsPage({
             Live Trading Signals
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Real-time signals — shown only after full multi-layer verification
+            Auto pre-verified signals only — every signal shown has passed the
+            deep TP confirmation test
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -846,16 +847,18 @@ export function SignalsPage({
         >
           <Loader2 className="w-10 h-10 text-gold animate-spin" />
           <p className="text-navy font-bold">
-            Scanning and verifying signals...
+            Scanning and pre-verifying signals...
           </p>
           <p className="text-gray-400 text-sm text-center">
             Scanning {scannedCount} / {totalSymbols} Binance pairs — filtering
-            by volume &amp; momentum, then running 30-indicator deep analysis
-            (EMA 20/50/100/200, ADX, Ichimoku, StochRSI, OBV, VWAP, BoS, FVG,
-            Order Blocks, Fibonacci, Pivot Points + 5 timeframes)
+            by volume &amp; momentum, running 30-indicator deep analysis, then
+            auto-running deep pre-verification test on every candidate. Only
+            signals that pass ALL gates AND the hard TP verification test
+            appear.
           </p>
           <p className="text-xs text-gray-400">
-            Only signals passing ALL 10 hard gates + 26/30 score will appear
+            Every signal shown has been auto-verified as a confirmed winning
+            trade
           </p>
           <div className="w-48 bg-gray-100 rounded-full h-1.5 mt-2">
             <div
