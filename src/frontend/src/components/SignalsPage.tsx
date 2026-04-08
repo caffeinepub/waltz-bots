@@ -12,7 +12,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { type LiveSignal, useSignalScan } from "@/context/SignalScanContext";
 import { useActor } from "@/hooks/useActor";
-import { deepTestSignal, useLivePrices } from "@/hooks/useMarketData";
+import { deepTestSignalLegacy, useLivePrices } from "@/hooks/useMarketData";
 import {
   Activity,
   BookmarkPlus,
@@ -637,8 +637,8 @@ export function SignalsPage({
     });
 
     try {
-      const livePrice = livePrices[signal.symbol]?.price ?? signal.currentPrice;
-      const result = await deepTestSignal(
+      const livePrice = livePrices[signal.symbol] ?? signal.currentPrice;
+      const result = await deepTestSignalLegacy(
         signal.symbol,
         {
           entryPrice: signal.entryPrice,
@@ -913,9 +913,7 @@ export function SignalsPage({
               >
                 <SignalCard
                   signal={signal}
-                  livePrice={
-                    livePrices[signal.symbol]?.price ?? signal.currentPrice
-                  }
+                  livePrice={livePrices[signal.symbol] ?? signal.currentPrice}
                   onClick={() => setSelectedSignal(signal)}
                   onTest={() => handleTest(signal)}
                   isTesting={testingId === signal.id}

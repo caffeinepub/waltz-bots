@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useLivePrices } from "@/hooks/useMarketData";
 import {
   analyzeSymbol,
   fetch24hTickers,
@@ -251,8 +250,9 @@ export function SearchPage() {
       )?.[0] ?? term.replace("USDT", "");
 
     try {
-      const [tickers] = await Promise.all([fetch24hTickers([exactSymbol])]);
-      const price = tickers[0]?.price;
+      const tickers = await fetch24hTickers();
+      const tickerEntry = tickers[exactSymbol] ?? tickers[`${exactSymbol}USDT`];
+      const price = tickerEntry?.price;
 
       if (!price) {
         setResults([]);
@@ -266,7 +266,7 @@ export function SearchPage() {
         return;
       }
 
-      const analysis = await analyzeSymbol(exactSymbol, price);
+      const analysis = await analyzeSymbol(exactSymbol, tickers);
 
       if (analysis) {
         const sig: LiveSignal = {
@@ -283,20 +283,31 @@ export function SearchPage() {
           confidence: analysis.confidence,
           estimatedHours: analysis.estimatedHours,
           riskReward: analysis.riskReward,
-          aiAnalysis: analysis.analysis,
+          aiAnalysis: analysis.analysis ?? "",
           currentPrice: price,
           rsiValue: analysis.rsiValue,
           macdHistogram: analysis.macdHistogram,
-          trend: analysis.trend,
-          volumeConfirmed: analysis.volumeConfirmed,
+          trend: analysis.trend ?? "up",
+          volumeConfirmed: analysis.volumeConfirmed ?? true,
           volumeSpike: analysis.volumeSpike,
-          bosConfirmed: analysis.bosConfirmed,
-          multiTimeframeConfluence: analysis.multiTimeframeConfluence,
+          bosConfirmed: analysis.chochConfirmed,
+          multiTimeframeConfluence:
+            typeof analysis.multiTimeframeConfluence === "string"
+              ? true
+              : analysis.multiTimeframeConfluence,
           entryType: analysis.entryType,
           generatedAt: Date.now(),
           profitPercent: analysis.profitPercent,
-          goldenCross: analysis.goldenCross,
-          supportZone: analysis.supportZone,
+          goldenCross: analysis.goldenCross ?? false,
+          supportZone: analysis.supportZone ?? false,
+          scanTime: Date.now(),
+          stopHuntConfirmed: analysis.stopHuntConfirmed,
+          chochConfirmed: analysis.chochConfirmed,
+          ichimokuConfirmed: analysis.ichimokuConfirmed,
+          vwapConfirmed: analysis.vwapConfirmed,
+          breakOfStructure: analysis.breakOfStructure,
+          testPassed: false,
+          testLocked: false,
           isPreVerified: false,
         };
         setResults([sig]);

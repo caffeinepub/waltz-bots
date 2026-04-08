@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { useActor } from "@/hooks/useActor";
-import { useLivePrices } from "@/hooks/useMarketData";
+import { useLivePricesLegacy as useLivePrices } from "@/hooks/useMarketData";
 import {
   Activity,
   AlertCircle,

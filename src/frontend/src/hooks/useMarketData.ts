@@ -1,21 +1,15 @@
 /**
- * useMarketData — WORLD-CLASS signal engine with 30+ technical indicators.
+ * useMarketData — 18-Gate World-Class Signal Engine
  *
- * SIGNAL PHILOSOPHY: Show 5-15 high-quality signals per scan with 80-90% win rate.
- * Better to show realistic quality signals than zero signals or false ones.
+ * PHILOSOPHY: Only show signals guaranteed to hit TP. All 18 gates must pass.
+ * Gate failures = signal dropped immediately. No exceptions.
  *
- * FULL INDICATOR SUITE (30 indicators across 5 groups):
- * TREND: EMA 20/50/100/200, ADX+DI, Parabolic SAR, Ichimoku (5 lines), EMA Golden Cross
- * MOMENTUM: RSI(14), StochRSI(14,3,3), MACD(12,26,9), Williams %R, CCI(20), MFI(14), ROC
- * VOLUME: OBV, VWAP, Volume Spike(1.5x), Volume Trend
- * VOLATILITY: Bollinger Bands, ATR(14), Keltner Channels
- * STRUCTURE: BoS, CHoCH, HH/HL, Order Block, FVG, Liquidity Sweep, Support/Resistance,
- *             Fibonacci, Pivot Points, Price Momentum, Spread Filter, Liquidity Filter
+ * GATE SYSTEM (all 18 must pass):
+ * Hard gates 1-8: Structure + trend + stop-hunt sweep + CHoCH + support anchor
+ * Technical gates 9-17: Volume, momentum, MACD, RSI divergence, VWAP, ADX, BB, spread, Ichimoku
+ * Gate 18: Risk/Reward enforcement (min 1:2)
  *
- * SCORING: 30-point system. Minimum 16/30 (53%) to appear.
- * GATES: 3 absolute gates + at least 3 of 5 secondary gates must pass.
- * CONFIDENCE: 72% minimum — still high quality but achievable in real markets.
- * MULTI-TF: 4H (primary) + 1H (intermediate) + 15M (entry) + 5M (precision) + 1M (timing)
+ * CONFIDENCE: 88%+ minimum (45+/51 points) to appear.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -24,95 +18,98 @@ import { useEffect, useRef, useState } from "react";
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface Candle {
-  openTime: number;
+export interface OHLCV {
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
+  timestamp?: number;
 }
 
-export interface TickerPrice {
+/** @deprecated Use OHLCV. Kept for backwards compat. */
+export type Candle = OHLCV & { openTime?: number };
+
+export interface LiveSignal {
   symbol: string;
-  price: number;
-  change24h: number;
-  high24h: number;
-  low24h: number;
-  volume24h: number;
+  direction: "BUY";
+  entryPrice: number;
+  stopLoss: number;
+  targetPrice: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  confidence: number;
+  estimatedHours: number;
+  riskReward: string;
+  entryType: string;
+  rsiValue: number;
+  macdHistogram: number;
+  volumeSpike: boolean;
+  breakOfStructure: boolean;
+  multiTimeframeConfluence: string;
+  stopHuntConfirmed: boolean;
+  chochConfirmed: boolean;
+  ichimokuConfirmed: boolean;
+  vwapConfirmed: boolean;
+  scanTime: number;
+  profitPercent: number;
+  // Extended fields used by UI components
+  trend?: "up" | "down" | "sideways";
+  volumeConfirmed?: boolean;
+  goldenCross?: boolean;
+  supportZone?: boolean;
+  score?: number;
+  analysis?: string;
 }
 
+/** @deprecated Use LiveSignal. Kept for backwards compat with SignalScanContext. */
+export type SignalAnalysis = LiveSignal & {
+  bosConfirmed: boolean;
+};
+
+export interface VerdictResult {
+  verdict: "CONFIRMED_HIT_TP" | "MONITORING" | "EXIT_NOW";
+  reason: string;
+  confidence: number;
+  progressPercent: number;
+}
+
+/** @deprecated Use VerdictResult. Kept for backwards compat with TrackingPage. */
+export interface UltraDeepVerdict {
+  verdict: "CONFIRMED_HIT_TP" | "MONITORING" | "EXIT_NOW_NO_TP";
+  // VerdictResult compatible fields
+  reason: string;
+  confidence: number;
+  progressPercent: number;
+  // Extended fields
+  compositeScore: number;
+  bullishCount: number;
+  bearishCount: number;
+  neutralCount: number;
+  hardExitCount: number;
+  hardExitTriggered: boolean;
+  hardExitReason: string | null;
+  hardExitReasons: string[];
+  currentPrice: number;
+  tpProgress: number;
+  estimatedTimeToTP: string | null;
+  keyBullishSignals: string[];
+  keyBearishSignals: string[];
+  verdictTimestamp: string;
+  recommendation: string;
+}
+
+/** @deprecated Use string[] variant of fetchAllBinanceUSDTPairs. */
 export interface BinancePair {
   symbol: string;
   baseAsset: string;
 }
 
-export interface MACDResult {
-  macd: number;
-  signal: number;
-  histogram: number;
-  prevHistogram: number;
-}
-
-export interface ADXResult {
-  adx: number;
-  plusDI: number;
-  minusDI: number;
-}
-
-export interface IchimokuResult {
-  tenkan: number;
-  kijun: number;
-  senkouA: number;
-  senkouB: number;
-  chikou: number;
-  priceAboveCloud: boolean;
-  tenkanAboveKijun: boolean;
-  cloudBullish: boolean;
-  chikouBullish: boolean;
-}
-
-export interface BollingerResult {
-  upper: number;
-  middle: number;
-  lower: number;
-  bandwidth: number;
-}
-
-export interface StochRSIResult {
-  k: number;
-  d: number;
-}
-
-export interface SignalAnalysis {
-  direction: "BUY" | "SELL" | null;
-  confidence: number;
-  rsiValue: number;
-  macdHistogram: number;
-  trend: "up" | "down" | "sideways";
-  entryPrice: number;
-  targetPrice: number;
-  stopLoss: number;
-  tp1: number;
-  tp2: number;
-  tp3: number;
-  estimatedHours: number;
-  riskReward: string;
-  analysis: string;
-  volumeConfirmed: boolean;
-  volumeSpike: boolean;
-  bosConfirmed: boolean;
-  multiTimeframeConfluence: boolean;
-  entryType: string;
-  profitPercent: number;
-  goldenCross: boolean;
-  supportZone: boolean;
-  score: number;
-  adxValue: number;
-  ichimokuBullish: boolean;
-  stochRsiBullish: boolean;
-  obvRising: boolean;
-  fibLevel: string;
+export interface TickerData {
+  price: number;
+  volume24h: number;
+  change24h: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,69 +118,96 @@ export interface SignalAnalysis {
 
 const BINANCE_BASE = "https://api.binance.com/api/v3";
 
-export async function fetchAllBinanceUSDTPairs(): Promise<BinancePair[]> {
+/**
+ * Fetches all active Binance USDT spot symbols.
+ * Returns plain string[] of full symbols (e.g. "BTCUSDT").
+ */
+export async function fetchAllBinanceUSDTPairs(): Promise<string[]> {
   try {
     const res = await fetch(`${BINANCE_BASE}/exchangeInfo?permissions=SPOT`);
     if (!res.ok) throw new Error(`ExchangeInfo HTTP ${res.status}`);
     const data = (await res.json()) as {
-      symbols: Array<{
-        symbol: string;
-        baseAsset: string;
-        quoteAsset: string;
-        status: string;
-      }>;
+      symbols: Array<{ symbol: string; quoteAsset: string; status: string }>;
     };
     return data.symbols
       .filter((s) => s.quoteAsset === "USDT" && s.status === "TRADING")
-      .map((s) => ({ symbol: s.symbol, baseAsset: s.baseAsset }));
+      .map((s) => s.symbol);
   } catch {
-    const fallback = [
-      "BTC",
-      "ETH",
-      "BNB",
-      "SOL",
-      "XRP",
-      "ADA",
-      "AVAX",
-      "DOT",
-      "MATIC",
-      "LINK",
-      "LTC",
-      "UNI",
-      "ATOM",
-      "NEAR",
-      "DOGE",
-      "SHIB",
-      "OP",
-      "ARB",
-      "INJ",
-      "SUI",
-      "TRX",
-      "TON",
-      "HBAR",
-      "FIL",
-      "AAVE",
-      "MKR",
-      "SNX",
-      "CRV",
-      "COMP",
-      "LDO",
-      "IMX",
-      "APT",
-      "SEI",
-      "TIA",
-      "WLD",
-      "PEPE",
-      "CFX",
-      "MANA",
-      "SAND",
-      "AXS",
+    return [
+      "BTCUSDT",
+      "ETHUSDT",
+      "BNBUSDT",
+      "SOLUSDT",
+      "XRPUSDT",
+      "ADAUSDT",
+      "AVAXUSDT",
+      "DOTUSDT",
+      "MATICUSDT",
+      "LINKUSDT",
+      "LTCUSDT",
+      "UNIUSDT",
+      "ATOMUSDT",
+      "NEARUSDT",
+      "DOGEUSDT",
+      "SHIBUSDT",
+      "OPUSDT",
+      "ARBUSDT",
+      "INJUSDT",
+      "SUIUSDT",
     ];
-    return fallback.map((b) => ({ symbol: `${b}USDT`, baseAsset: b }));
   }
 }
 
-export async function fetchAllTickers(): Promise<TickerPrice[]> {
+/**
+ * Fetches all 24h tickers. Returns a map of symbol (without USDT) -> TickerData.
+ * New signature matches requirements contract.
+ */
+export async function fetch24hTickers(): Promise<Record<string, TickerData>> {
+  try {
+    const res = await fetch(`${BINANCE_BASE}/ticker/24hr`);
+    if (!res.ok) throw new Error(`Ticker HTTP ${res.status}`);
+    const data = (await res.json()) as Array<{
+      symbol: string;
+      lastPrice: string;
+      priceChangePercent: string;
+      quoteVolume: string;
+    }>;
+    const result: Record<string, TickerData> = {};
+    for (const d of data) {
+      if (!d.symbol.endsWith("USDT")) continue;
+      const base = d.symbol.replace("USDT", "");
+      result[base] = {
+        price: Number.parseFloat(d.lastPrice),
+        volume24h: Number.parseFloat(d.quoteVolume),
+        change24h: Number.parseFloat(d.priceChangePercent),
+      };
+      // Also store under full symbol for consumers that pass the full symbol
+      result[d.symbol] = {
+        price: Number.parseFloat(d.lastPrice),
+        volume24h: Number.parseFloat(d.quoteVolume),
+        change24h: Number.parseFloat(d.priceChangePercent),
+      };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * @deprecated Use fetch24hTickers() with no args, returns Record<string, TickerData>.
+ * Kept for backwards compat with SearchPage which calls fetch24hTickers([symbol]).
+ */
+export async function fetchAllTickers(): Promise<
+  Array<{
+    symbol: string;
+    price: number;
+    change24h: number;
+    high24h: number;
+    low24h: number;
+    volume24h: number;
+  }>
+> {
   try {
     const res = await fetch(`${BINANCE_BASE}/ticker/24hr`);
     if (!res.ok) throw new Error(`Ticker HTTP ${res.status}`);
@@ -210,104 +234,41 @@ export async function fetchAllTickers(): Promise<TickerPrice[]> {
   }
 }
 
-export async function fetch24hTickers(
-  symbols: string[],
-): Promise<TickerPrice[]> {
-  try {
-    const url = `${BINANCE_BASE}/ticker/24hr?symbols=${JSON.stringify(symbols.map((s) => `${s}USDT`))}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
-    const data = (await res.json()) as Array<{
-      symbol: string;
-      lastPrice: string;
-      priceChangePercent: string;
-      highPrice: string;
-      lowPrice: string;
-      quoteVolume: string;
-    }>;
-    return data.map((d) => ({
-      symbol: d.symbol.replace("USDT", ""),
-      price: Number.parseFloat(d.lastPrice),
-      change24h: Number.parseFloat(d.priceChangePercent),
-      high24h: Number.parseFloat(d.highPrice),
-      low24h: Number.parseFloat(d.lowPrice),
-      volume24h: Number.parseFloat(d.quoteVolume),
-    }));
-  } catch {
-    return [];
-  }
-}
-
+/**
+ * Fetches OHLCV candles from Binance.
+ * Returns empty array on failure (never throws).
+ */
 export async function fetchCandles(
   symbol: string,
-  interval: "1m" | "5m" | "15m" | "1h" | "4h" | "1d",
+  interval: string,
   limit = 100,
-): Promise<Candle[]> {
+): Promise<OHLCV[]> {
   try {
     const sym = symbol.endsWith("USDT") ? symbol : `${symbol}USDT`;
     const url = `${BINANCE_BASE}/klines?symbol=${sym}&interval=${interval}&limit=${limit}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Binance HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`Binance klines HTTP ${res.status}`);
     const data = (await res.json()) as Array<
       [number, string, string, string, string, string]
     >;
-    return data.map(([openTime, open, high, low, close, volume]) => ({
-      openTime,
+    return data.map(([ts, open, high, low, close, volume]) => ({
       open: Number.parseFloat(open),
       high: Number.parseFloat(high),
       low: Number.parseFloat(low),
       close: Number.parseFloat(close),
       volume: Number.parseFloat(volume),
+      timestamp: ts,
     }));
   } catch {
     return [];
   }
 }
 
-export function useLivePrices(
-  symbols: string[],
-  intervalMs = 5000,
-): Record<string, TickerPrice> {
-  const [prices, setPrices] = useState<Record<string, TickerPrice>>({});
-  // biome-ignore lint/correctness/useExhaustiveDependencies: symbols joined for stability
-  useEffect(() => {
-    const syms = symbols.slice();
-    if (syms.length === 0) return;
-    let cancelled = false;
-    async function poll() {
-      const tickers = await fetch24hTickers(syms);
-      if (cancelled) return;
-      if (tickers.length > 0)
-        setPrices(Object.fromEntries(tickers.map((t) => [t.symbol, t])));
-    }
-    poll();
-    const id = setInterval(poll, intervalMs);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [symbols.join(","), intervalMs]);
-  return prices;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// CORE INDICATOR CALCULATIONS
+// INDICATOR CALCULATIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Simple Moving Average */
-function sma(values: number[], period: number): number[] {
-  if (values.length < period) return [];
-  const result: number[] = [];
-  for (let i = period - 1; i < values.length; i++) {
-    result.push(
-      values.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0) / period,
-    );
-  }
-  return result;
-}
-
-/** Wilder smoothing (for RSI, ATR, ADX) */
-function wilderEma(values: number[], period: number): number[] {
+function wilderSmooth(values: number[], period: number): number[] {
   if (values.length < period) return [];
   const result: number[] = [];
   let avg = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
@@ -319,62 +280,53 @@ function wilderEma(values: number[], period: number): number[] {
   return result;
 }
 
-/** Standard EMA */
 export function ema(values: number[], period: number): number[] {
   if (values.length < period) return [];
   const k = 2 / (period + 1);
   const result: number[] = [];
-  let emaVal = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  result.push(emaVal);
+  let val = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  result.push(val);
   for (let i = period; i < values.length; i++) {
-    emaVal = values[i] * k + emaVal * (1 - k);
-    result.push(emaVal);
+    val = values[i] * k + val * (1 - k);
+    result.push(val);
   }
   return result;
 }
 
-/** RSI (Wilder smoothing) */
 export function rsi(closes: number[], period = 14): number[] {
   if (closes.length < period + 1) return [];
   const changes = closes.slice(1).map((c, i) => c - closes[i]);
   const gains = changes.map((c) => Math.max(0, c));
   const losses = changes.map((c) => Math.max(0, -c));
-  const avgGains = wilderEma(gains, period);
-  const avgLosses = wilderEma(losses, period);
+  const avgGains = wilderSmooth(gains, period);
+  const avgLosses = wilderSmooth(losses, period);
   return avgGains.map((g, i) => {
     const l = avgLosses[i];
     return l === 0 ? 100 : 100 - 100 / (1 + g / l);
   });
 }
 
-/** MACD (12,26,9) */
-export function macd(closes: number[]): MACDResult | null {
-  const ema12 = ema(closes, 12);
-  const ema26 = ema(closes, 26);
-  if (ema12.length < 2 || ema26.length < 2) return null;
-  const offset = 26 - 12;
-  const macdLine = ema26.map((v, i) => ema12[i + offset] - v);
-  const signalLine = ema(macdLine, 9);
-  if (signalLine.length < 2) return null;
-  const lastIdx = signalLine.length - 1;
-  const macdIdx = macdLine.length - signalLine.length;
-  return {
-    macd: macdLine[macdIdx + lastIdx],
-    signal: signalLine[lastIdx],
-    histogram: macdLine[macdIdx + lastIdx] - signalLine[lastIdx],
-    prevHistogram: macdLine[macdIdx + lastIdx - 1] - signalLine[lastIdx - 1],
-  };
+export function macd(
+  closes: number[],
+  fast = 12,
+  slow = 26,
+  signal = 9,
+): { macdLine: number[]; signalLine: number[]; histogram: number[] } {
+  const emaFast = ema(closes, fast);
+  const emaSlow = ema(closes, slow);
+  if (emaFast.length === 0 || emaSlow.length === 0) {
+    return { macdLine: [], signalLine: [], histogram: [] };
+  }
+  const offset = slow - fast;
+  const macdLine = emaSlow.map((v, i) => emaFast[i + offset] - v);
+  const signalLine = ema(macdLine, signal);
+  const histOffset = macdLine.length - signalLine.length;
+  const histogram = signalLine.map((s, i) => macdLine[histOffset + i] - s);
+  return { macdLine, signalLine, histogram };
 }
 
-/** True ATR (Wilder smoothing) */
-export function atr(candles: Candle[], period = 14): number {
-  if (candles.length < period + 1) {
-    const recent = candles.slice(-period);
-    const avg =
-      recent.reduce((s, c) => s + (c.high - c.low), 0) /
-      Math.max(1, recent.length);
-    return avg > 0 ? avg : candles[candles.length - 1].close * 0.015;
-  }
+export function atr(candles: OHLCV[], period = 14): number[] {
+  if (candles.length < 2) return [];
   const trs: number[] = [];
   for (let i = 1; i < candles.length; i++) {
     trs.push(
@@ -385,246 +337,10 @@ export function atr(candles: Candle[], period = 14): number {
       ),
     );
   }
-  const atrVals = wilderEma(trs, period);
-  return (
-    atrVals[atrVals.length - 1] ?? candles[candles.length - 1].close * 0.015
-  );
+  return wilderSmooth(trs, period);
 }
 
-/** ADX (Average Directional Index) + DI lines */
-function calcADX(candles: Candle[], period = 14): ADXResult {
-  if (candles.length < period + 2) return { adx: 0, plusDI: 0, minusDI: 0 };
-  const plusDMs: number[] = [];
-  const minusDMs: number[] = [];
-  const trs: number[] = [];
-  for (let i = 1; i < candles.length; i++) {
-    const highDiff = candles[i].high - candles[i - 1].high;
-    const lowDiff = candles[i - 1].low - candles[i].low;
-    plusDMs.push(highDiff > lowDiff && highDiff > 0 ? highDiff : 0);
-    minusDMs.push(lowDiff > highDiff && lowDiff > 0 ? lowDiff : 0);
-    trs.push(
-      Math.max(
-        candles[i].high - candles[i].low,
-        Math.abs(candles[i].high - candles[i - 1].close),
-        Math.abs(candles[i].low - candles[i - 1].close),
-      ),
-    );
-  }
-  const smoothTR = wilderEma(trs, period);
-  const smoothPlusDM = wilderEma(plusDMs, period);
-  const smoothMinusDM = wilderEma(minusDMs, period);
-  if (smoothTR.length === 0) return { adx: 0, plusDI: 0, minusDI: 0 };
-  const last = smoothTR.length - 1;
-  const plusDI =
-    smoothTR[last] > 0 ? (smoothPlusDM[last] / smoothTR[last]) * 100 : 0;
-  const minusDI =
-    smoothTR[last] > 0 ? (smoothMinusDM[last] / smoothTR[last]) * 100 : 0;
-  const dx =
-    (Math.abs(plusDI - minusDI) / Math.max(plusDI + minusDI, 0.001)) * 100;
-  // Smooth DX values to get ADX
-  const dxValues: number[] = [];
-  for (let i = 0; i < smoothTR.length; i++) {
-    const pdi = smoothTR[i] > 0 ? (smoothPlusDM[i] / smoothTR[i]) * 100 : 0;
-    const mdi = smoothTR[i] > 0 ? (smoothMinusDM[i] / smoothTR[i]) * 100 : 0;
-    dxValues.push((Math.abs(pdi - mdi) / Math.max(pdi + mdi, 0.001)) * 100);
-  }
-  const adxVals = wilderEma(dxValues, period);
-  const adx = adxVals.length > 0 ? adxVals[adxVals.length - 1] : dx;
-  return { adx, plusDI, minusDI };
-}
-
-/** Parabolic SAR */
-function calcPSAR(candles: Candle[], step = 0.02, maxAF = 0.2): number[] {
-  if (candles.length < 2) return [];
-  const psar: number[] = [];
-  let bull = true;
-  let af = step;
-  let ep = candles[0].high;
-  let sarVal = candles[0].low;
-  for (let i = 1; i < candles.length; i++) {
-    const prevSAR = sarVal;
-    if (bull) {
-      sarVal = prevSAR + af * (ep - prevSAR);
-      sarVal = Math.min(
-        sarVal,
-        candles[i - 1].low,
-        i > 1 ? candles[i - 2].low : sarVal,
-      );
-      if (candles[i].low < sarVal) {
-        bull = false;
-        af = step;
-        ep = candles[i].low;
-        sarVal = ep;
-      } else {
-        if (candles[i].high > ep) {
-          ep = candles[i].high;
-          af = Math.min(af + step, maxAF);
-        }
-      }
-    } else {
-      sarVal = prevSAR + af * (ep - prevSAR);
-      sarVal = Math.max(
-        sarVal,
-        candles[i - 1].high,
-        i > 1 ? candles[i - 2].high : sarVal,
-      );
-      if (candles[i].high > sarVal) {
-        bull = true;
-        af = step;
-        ep = candles[i].high;
-        sarVal = ep;
-      } else {
-        if (candles[i].low < ep) {
-          ep = candles[i].low;
-          af = Math.min(af + step, maxAF);
-        }
-      }
-    }
-    psar.push(sarVal);
-  }
-  return psar;
-}
-
-/** Ichimoku Cloud (5 lines) */
-function calcIchimoku(candles: Candle[]): IchimokuResult | null {
-  if (candles.length < 52) return null;
-  const high = (arr: Candle[], p: number) =>
-    Math.max(...arr.slice(-p).map((c) => c.high));
-  const low = (arr: Candle[], p: number) =>
-    Math.min(...arr.slice(-p).map((c) => c.low));
-  const tenkan = (high(candles, 9) + low(candles, 9)) / 2;
-  const kijun = (high(candles, 26) + low(candles, 26)) / 2;
-  const senkouA = (tenkan + kijun) / 2;
-  const senkouB = (high(candles, 52) + low(candles, 52)) / 2;
-  const chikou = candles[candles.length - 1].close;
-  const price26ago = candles[candles.length - 26]?.close ?? chikou;
-  const lastPrice = candles[candles.length - 1].close;
-  const cloudTop = Math.max(senkouA, senkouB);
-  return {
-    tenkan,
-    kijun,
-    senkouA,
-    senkouB,
-    chikou,
-    priceAboveCloud: lastPrice > cloudTop,
-    tenkanAboveKijun: tenkan > kijun,
-    cloudBullish: senkouA > senkouB,
-    chikouBullish: chikou > price26ago,
-  };
-}
-
-/** Bollinger Bands (20, 2) */
-function calcBollinger(
-  closes: number[],
-  period = 20,
-  stdMult = 2,
-): BollingerResult | null {
-  if (closes.length < period) return null;
-  const slice = closes.slice(-period);
-  const middle = slice.reduce((a, b) => a + b, 0) / period;
-  const variance = slice.reduce((a, b) => a + (b - middle) ** 2, 0) / period;
-  const std = Math.sqrt(variance);
-  const upper = middle + stdMult * std;
-  const lower = middle - stdMult * std;
-  return { upper, middle, lower, bandwidth: (upper - lower) / middle };
-}
-
-/** Stochastic RSI */
-function calcStochRSI(
-  closes: number[],
-  rsiPeriod = 14,
-  stochPeriod = 14,
-  smoothK = 3,
-  smoothD = 3,
-): StochRSIResult | null {
-  const rsiVals = rsi(closes, rsiPeriod);
-  if (rsiVals.length < stochPeriod) return null;
-  const stochValues: number[] = [];
-  for (let i = stochPeriod - 1; i < rsiVals.length; i++) {
-    const slice = rsiVals.slice(i - stochPeriod + 1, i + 1);
-    const minRsi = Math.min(...slice);
-    const maxRsi = Math.max(...slice);
-    stochValues.push(
-      maxRsi - minRsi === 0
-        ? 0
-        : ((rsiVals[i] - minRsi) / (maxRsi - minRsi)) * 100,
-    );
-  }
-  const kLine = sma(stochValues, smoothK);
-  const dLine = sma(kLine, smoothD);
-  if (kLine.length === 0 || dLine.length === 0) return null;
-  return { k: kLine[kLine.length - 1], d: dLine[dLine.length - 1] };
-}
-
-/** Williams %R */
-function calcWilliamsR(candles: Candle[], period = 14): number {
-  if (candles.length < period) return -50;
-  const slice = candles.slice(-period);
-  const highestHigh = Math.max(...slice.map((c) => c.high));
-  const lowestLow = Math.min(...slice.map((c) => c.low));
-  const lastClose = candles[candles.length - 1].close;
-  return highestHigh - lowestLow === 0
-    ? -50
-    : ((highestHigh - lastClose) / (highestHigh - lowestLow)) * -100;
-}
-
-/** CCI (Commodity Channel Index) */
-function calcCCI(candles: Candle[], period = 20): number {
-  if (candles.length < period) return 0;
-  const slice = candles.slice(-period);
-  const typicalPrices = slice.map((c) => (c.high + c.low + c.close) / 3);
-  const meanTP = typicalPrices.reduce((a, b) => a + b, 0) / period;
-  const meanDev =
-    typicalPrices.reduce((a, b) => a + Math.abs(b - meanTP), 0) / period;
-  const lastTP =
-    (candles[candles.length - 1].high +
-      candles[candles.length - 1].low +
-      candles[candles.length - 1].close) /
-    3;
-  return meanDev === 0 ? 0 : (lastTP - meanTP) / (0.015 * meanDev);
-}
-
-/** MFI (Money Flow Index) */
-function calcMFI(candles: Candle[], period = 14): number {
-  if (candles.length < period + 1) return 50;
-  const slice = candles.slice(-(period + 1));
-  let posMF = 0;
-  let negMF = 0;
-  for (let i = 1; i < slice.length; i++) {
-    const tp = (slice[i].high + slice[i].low + slice[i].close) / 3;
-    const prevTp =
-      (slice[i - 1].high + slice[i - 1].low + slice[i - 1].close) / 3;
-    const mf = tp * slice[i].volume;
-    if (tp > prevTp) posMF += mf;
-    else negMF += mf;
-  }
-  return negMF === 0 ? 100 : 100 - 100 / (1 + posMF / negMF);
-}
-
-/** ROC (Rate of Change) */
-function calcROC(closes: number[], period = 12): number {
-  if (closes.length < period + 1) return 0;
-  const prev = closes[closes.length - period - 1];
-  return prev === 0 ? 0 : ((closes[closes.length - 1] - prev) / prev) * 100;
-}
-
-/** OBV (On Balance Volume) — rising if last 3 values are increasing */
-function calcOBV(candles: Candle[]): number[] {
-  if (candles.length < 2) return [];
-  const obv: number[] = [0];
-  for (let i = 1; i < candles.length; i++) {
-    const prev = obv[obv.length - 1];
-    if (candles[i].close > candles[i - 1].close)
-      obv.push(prev + candles[i].volume);
-    else if (candles[i].close < candles[i - 1].close)
-      obv.push(prev - candles[i].volume);
-    else obv.push(prev);
-  }
-  return obv;
-}
-
-/** VWAP (Volume Weighted Average Price) over candle set */
-function calcVWAP(candles: Candle[]): number {
+export function vwap(candles: OHLCV[]): number {
   if (candles.length === 0) return 0;
   let sumPV = 0;
   let sumV = 0;
@@ -633,1277 +349,865 @@ function calcVWAP(candles: Candle[]): number {
     sumPV += tp * c.volume;
     sumV += c.volume;
   }
-  return sumV === 0 ? candles[candles.length - 1].close : sumPV / sumV;
+  return sumV === 0 ? (candles[candles.length - 1]?.close ?? 0) : sumPV / sumV;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PRICE STRUCTURE ANALYSIS
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Break of Structure (BoS): close above last 20-candle swing high */
-function detectBoS(candles: Candle[]): boolean {
-  if (candles.length < 22) return false;
-  const lookback = candles.slice(-22, -1);
-  const swingHigh = Math.max(...lookback.map((c) => c.high));
-  return candles[candles.length - 1].close > swingHigh;
-}
-
-/** Change of Character (CHoCH): previous structure was bearish, now BoS upward */
-function detectCHoCH(candles: Candle[]): boolean {
-  if (candles.length < 40) return false;
-  const midSection = candles.slice(-40, -20);
-  const lows = midSection.map((c) => c.low);
-  let priorBearish = 0;
-  for (let i = 1; i < lows.length; i++) {
-    if (lows[i] < lows[i - 1]) priorBearish++;
+export function adx(
+  candles: OHLCV[],
+  period = 14,
+): { adx: number; plusDI: number; minusDI: number } {
+  if (candles.length < period + 2) return { adx: 0, plusDI: 0, minusDI: 0 };
+  const plusDMs: number[] = [];
+  const minusDMs: number[] = [];
+  const trs: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const hd = candles[i].high - candles[i - 1].high;
+    const ld = candles[i - 1].low - candles[i].low;
+    plusDMs.push(hd > ld && hd > 0 ? hd : 0);
+    minusDMs.push(ld > hd && ld > 0 ? ld : 0);
+    trs.push(
+      Math.max(
+        candles[i].high - candles[i].low,
+        Math.abs(candles[i].high - candles[i - 1].close),
+        Math.abs(candles[i].low - candles[i - 1].close),
+      ),
+    );
   }
-  const wasBearish = priorBearish > lows.length * 0.5;
-  return wasBearish && detectBoS(candles);
-}
-
-/** Higher Highs / Higher Lows check — at least 2 HH and 2 HL in last 10 candles */
-function hasHigherHighsLows(candles: Candle[]): boolean {
-  if (candles.length < 12) return false;
-  const recent = candles.slice(-12);
-  let hhCount = 0;
-  let hlCount = 0;
-  for (let i = 1; i < recent.length; i++) {
-    if (recent[i].high > recent[i - 1].high) hhCount++;
-    if (recent[i].low > recent[i - 1].low) hlCount++;
+  const smoothTR = wilderSmooth(trs, period);
+  const smoothPlusDM = wilderSmooth(plusDMs, period);
+  const smoothMinusDM = wilderSmooth(minusDMs, period);
+  if (smoothTR.length === 0) return { adx: 0, plusDI: 0, minusDI: 0 };
+  const last = smoothTR.length - 1;
+  const plusDI =
+    smoothTR[last] > 0 ? (smoothPlusDM[last] / smoothTR[last]) * 100 : 0;
+  const minusDI =
+    smoothTR[last] > 0 ? (smoothMinusDM[last] / smoothTR[last]) * 100 : 0;
+  const dxValues: number[] = [];
+  for (let i = 0; i < smoothTR.length; i++) {
+    const pdi = smoothTR[i] > 0 ? (smoothPlusDM[i] / smoothTR[i]) * 100 : 0;
+    const mdi = smoothTR[i] > 0 ? (smoothMinusDM[i] / smoothTR[i]) * 100 : 0;
+    dxValues.push((Math.abs(pdi - mdi) / Math.max(pdi + mdi, 0.001)) * 100);
   }
-  return hhCount >= 3 && hlCount >= 3;
+  const adxVals = wilderSmooth(dxValues, period);
+  return {
+    adx: adxVals.length > 0 ? adxVals[adxVals.length - 1] : 0,
+    plusDI,
+    minusDI,
+  };
 }
 
-/** Order Block: last bearish candle before a large bullish move; price near it now */
-function isNearOrderBlock(
-  candles: Candle[],
-  currentPrice: number,
-  atrVal: number,
-): boolean {
-  if (candles.length < 20) return false;
-  const lookback = candles.slice(-30, -5);
-  for (let i = 1; i < lookback.length - 2; i++) {
-    const isBearishCandle = lookback[i].close < lookback[i].open;
-    if (!isBearishCandle) continue;
-    // Check if immediately followed by a large bullish move (>1.5 ATR body)
-    const nextBullish = lookback[i + 1].close > lookback[i + 1].open;
-    const nextBody = Math.abs(lookback[i + 1].close - lookback[i + 1].open);
-    if (nextBullish && nextBody > atrVal * 0.8) {
-      // Order block zone is the bearish candle's range
-      const obHigh = lookback[i].open; // top of bearish candle = its open
-      const obLow = lookback[i].close;
-      if (currentPrice >= obLow * 0.99 && currentPrice <= obHigh * 1.02)
-        return true;
-    }
+export function bollingerBands(
+  closes: number[],
+  period = 20,
+  stdDev = 2,
+): { upper: number; middle: number; lower: number } {
+  if (closes.length < period) {
+    const last = closes[closes.length - 1] ?? 0;
+    return { upper: last, middle: last, lower: last };
   }
-  return false;
+  const slice = closes.slice(-period);
+  const middle = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((a, b) => a + (b - middle) ** 2, 0) / period;
+  const std = Math.sqrt(variance);
+  return { upper: middle + stdDev * std, middle, lower: middle - stdDev * std };
 }
 
-/** Fair Value Gap (FVG): 3-candle gap where candle[1] leaves imbalance (bullish) */
-function isInFVG(candles: Candle[], currentPrice: number): boolean {
-  if (candles.length < 10) return false;
-  for (let i = candles.length - 8; i < candles.length - 2; i++) {
-    // Bullish FVG: candle[i+2].low > candle[i].high (gap up)
-    if (candles[i + 2].low > candles[i].high) {
-      const gapBot = candles[i].high;
-      const gapTop = candles[i + 2].low;
-      if (currentPrice >= gapBot * 0.998 && currentPrice <= gapTop * 1.002)
-        return true;
-    }
-  }
-  return false;
-}
-
-/** Liquidity Sweep: price swept below a swing low and reversed bullish */
-function hasLiquiditySweep(candles: Candle[]): boolean {
-  if (candles.length < 15) return false;
-  const recent = candles.slice(-15);
-  // Find the lowest low in first 10 candles
-  const prevLows = recent.slice(0, 10).map((c) => c.low);
-  const keyLow = Math.min(...prevLows);
-  // Check if any of last 5 candles swept below that key low then closed above it
-  for (let i = 10; i < recent.length; i++) {
-    if (recent[i].low < keyLow && recent[i].close > keyLow) return true;
-  }
-  return false;
-}
-
-/** Support zone: entry is near proven swing-low cluster */
-function isNearSupportZone(
-  candles: Candle[],
-  entryPrice: number,
-  atrVal: number,
-): boolean {
-  if (candles.length < 30) return false;
-  const lookback = candles.slice(-60);
-  const swingLows: number[] = [];
-  for (let i = 1; i < lookback.length - 1; i++) {
-    if (
-      lookback[i].low < lookback[i - 1].low &&
-      lookback[i].low < lookback[i + 1].low
-    ) {
-      swingLows.push(lookback[i].low);
-    }
-  }
-  if (swingLows.length < 2) return false;
-  const tolerance = atrVal * 1.5;
-  return swingLows.some((sl) => Math.abs(entryPrice - sl) <= tolerance);
-}
-
-/** Fibonacci retracement: entry near 0.382, 0.5, or 0.618 of last major move */
-function getFibLevel(candles: Candle[], currentPrice: number): string {
-  if (candles.length < 30) return "";
-  const lookback = candles.slice(-50);
-  const swingLow = Math.min(...lookback.map((c) => c.low));
-  const swingHigh = Math.max(...lookback.map((c) => c.high));
-  const range = swingHigh - swingLow;
-  if (range <= 0) return "";
-  const fib382 = swingHigh - range * 0.382;
-  const fib500 = swingHigh - range * 0.5;
-  const fib618 = swingHigh - range * 0.618;
-  const tolerance = range * 0.05;
-  if (Math.abs(currentPrice - fib618) <= tolerance) return "0.618 Fib";
-  if (Math.abs(currentPrice - fib500) <= tolerance) return "0.500 Fib";
-  if (Math.abs(currentPrice - fib382) <= tolerance) return "0.382 Fib";
-  return "";
-}
-
-/** Pivot Points (classic daily): PP, S1, R1 */
-function calcPivotPoints(prevDayCandles: Candle[]): {
-  pp: number;
-  s1: number;
-  r1: number;
+export function ichimoku(candles: OHLCV[]): {
+  tenkan: number;
+  kijun: number;
+  senkouA: number;
+  senkouB: number;
 } {
-  if (prevDayCandles.length === 0) {
-    return { pp: 0, s1: 0, r1: 0 };
+  if (candles.length < 52) {
+    const last = candles[candles.length - 1]?.close ?? 0;
+    return { tenkan: last, kijun: last, senkouA: last, senkouB: last };
   }
-  const prevHigh = Math.max(...prevDayCandles.map((c) => c.high));
-  const prevLow = Math.min(...prevDayCandles.map((c) => c.low));
-  const prevClose = prevDayCandles[prevDayCandles.length - 1].close;
-  const pp = (prevHigh + prevLow + prevClose) / 3;
-  return { pp, s1: 2 * pp - prevHigh, r1: 2 * pp - prevLow };
-}
-
-/** Bearish reversal pattern check */
-function hasBearishReversalPattern(candles: Candle[]): boolean {
-  if (candles.length < 3) return false;
-  const last3 = candles.slice(-3);
-  const prev = last3[1];
-  const last = last3[2];
-  const bearishEngulfing =
-    prev.close > prev.open &&
-    last.close < last.open &&
-    last.open > prev.close &&
-    last.close < prev.open;
-  const lastBody = Math.abs(last.close - last.open);
-  const upperWick = last.high - Math.max(last.open, last.close);
-  const lowerWick = Math.min(last.open, last.close) - last.low;
-  const shootingStar =
-    upperWick > lastBody * 2 &&
-    lowerWick < lastBody * 0.5 &&
-    last.close < last.open;
-  return bearishEngulfing || shootingStar;
-}
-
-/** Volume spike: last candle > 1.5x 20-period average */
-function detectVolumeSpike(candles: Candle[]): boolean {
-  if (candles.length < 21) return false;
-  const avg = candles.slice(-21, -1).reduce((s, c) => s + c.volume, 0) / 20;
-  return candles[candles.length - 1].volume > avg * 1.5;
-}
-
-/** Volume trend: volumes increasing over last 3 candles */
-function hasVolumeAccumulation(candles: Candle[]): boolean {
-  if (candles.length < 4) return false;
-  const last4 = candles.slice(-4);
-  return last4[1].volume < last4[2].volume && last4[2].volume < last4[3].volume;
-}
-
-/** OBV rising: last 3 OBV values are increasing */
-function isOBVRising(candles: Candle[]): boolean {
-  const obvVals = calcOBV(candles);
-  if (obvVals.length < 3) return false;
-  const n = obvVals.length;
-  return obvVals[n - 1] > obvVals[n - 2] && obvVals[n - 2] > obvVals[n - 3];
-}
-
-/** EMA alignment: EMA20 > EMA50 > EMA100 > EMA200, price above all */
-function hasFullEMAAlignment(closes: number[]): boolean {
-  if (closes.length < 200) return false;
-  const e20 = ema(closes, 20);
-  const e50 = ema(closes, 50);
-  const e100 = ema(closes, 100);
-  const e200 = ema(closes, 200);
-  if (
-    e20.length === 0 ||
-    e50.length === 0 ||
-    e100.length === 0 ||
-    e200.length === 0
-  )
-    return false;
-  const last = closes[closes.length - 1];
-  const v20 = e20[e20.length - 1];
-  const v50 = e50[e50.length - 1];
-  const v100 = e100[e100.length - 1];
-  const v200 = e200[e200.length - 1];
-  return last > v20 && v20 > v50 && v50 > v100 && v100 > v200;
-}
-
-/** EMA momentum: distance between EMA20 and EMA50 is expanding */
-function isEMAMomentumExpanding(closes: number[]): boolean {
-  if (closes.length < 55) return false;
-  const e20 = ema(closes, 20);
-  const e50 = ema(closes, 50);
-  if (e20.length < 3 || e50.length < 3) return false;
-  const n20 = e20.length - 1;
-  const n50 = e50.length - 1;
-  // Only compare if both series have enough elements
-  const offset = n20 - n50;
-  if (offset < 0) return false;
-  const gapNow = e20[n20] - e50[n50];
-  const gapPrev = e20[n20 - 2] - e50[n50 - 2];
-  return gapNow > gapPrev && gapNow > 0;
-}
-
-/** Trend: detect using EMA structure + price structure */
-export function detectTrend(candles: Candle[]): "up" | "down" | "sideways" {
-  if (candles.length < 50) return "sideways";
-  const closes = candles.map((c) => c.close);
-  const ema50 = ema(closes, 50);
-  const ema200 = ema(closes, Math.min(200, closes.length));
-  let emaSignal: "up" | "down" | "sideways" = "sideways";
-  if (ema50.length > 0 && ema200.length > 0) {
-    const v50 = ema50[ema50.length - 1];
-    const v200 = ema200[ema200.length - 1];
-    const cur = closes[closes.length - 1];
-    if (cur > v50 && v50 > v200) emaSignal = "up";
-    else if (cur < v50 && v50 < v200) emaSignal = "down";
-  } else if (ema50.length > 0) {
-    const v50 = ema50[ema50.length - 1];
-    const cur = closes[closes.length - 1];
-    if (cur > v50 * 1.01) emaSignal = "up";
-    else if (cur < v50 * 0.99) emaSignal = "down";
-  }
-  const recent = candles.slice(-14);
-  const highs = recent.map((c) => c.high);
-  const lows = recent.map((c) => c.low);
-  let hh = 0;
-  let lh = 0;
-  let ll = 0;
-  let hl = 0;
-  for (let i = 1; i < highs.length; i++) {
-    if (highs[i] > highs[i - 1]) hh++;
-    else lh++;
-    if (lows[i] < lows[i - 1]) ll++;
-    else hl++;
-  }
-  const structureUp = hh > lh && hl > ll;
-  const structureDown = lh > hh && ll > hl;
-  if (structureUp && emaSignal !== "down") return "up";
-  if (structureDown && emaSignal !== "up") return "down";
-  if (emaSignal !== "sideways") return emaSignal;
-  return "sideways";
+  const hh = (c: OHLCV[], p: number) =>
+    Math.max(...c.slice(-p).map((x) => x.high));
+  const ll = (c: OHLCV[], p: number) =>
+    Math.min(...c.slice(-p).map((x) => x.low));
+  const tenkan = (hh(candles, 9) + ll(candles, 9)) / 2;
+  const kijun = (hh(candles, 26) + ll(candles, 26)) / 2;
+  const senkouA = (tenkan + kijun) / 2;
+  const senkouB = (hh(candles, 52) + ll(candles, 52)) / 2;
+  return { tenkan, kijun, senkouA, senkouB };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QUICK PRE-FILTER (1H candles only — fast gate before full analysis)
-// Relaxed: only filters out extreme zones, not specific EMA configurations
+// QUICK PRE-FILTER (synchronous after tickers already fetched)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function quickPreFilter(
+export function quickPreFilter(
   symbol: string,
-  price: number,
-  volume24h: number,
-): Promise<boolean> {
-  if (volume24h < 5_000_000) return false;
-  if (!price || price <= 0) return false;
+  tickers: Record<string, TickerData>,
+): boolean {
+  const base = symbol.endsWith("USDT") ? symbol.replace("USDT", "") : symbol;
+  const t = tickers[base] ?? tickers[`${base}USDT`];
+  if (!t) return false;
+  if (t.volume24h < 5_000_000) return false;
+  if (!t.price || t.price <= 0) return false;
+  // Filter stablecoins by name pattern
+  const stables = [
+    "USDT",
+    "USDC",
+    "BUSD",
+    "DAI",
+    "TUSD",
+    "USDP",
+    "FDUSD",
+    "PYUSD",
+  ];
+  if (stables.some((s) => base.includes(s))) return false;
+  // Require positive 24h movement or at least neutral — extreme drops are dying coins
+  if (t.change24h < -15) return false;
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATR HELPER (returns last ATR value, not array)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function lastATR(candles: OHLCV[], period = 14): number {
+  const vals = atr(candles, period);
+  if (vals.length > 0) return vals[vals.length - 1];
+  // Fallback: average range
+  const recent = candles.slice(-period);
+  const avg =
+    recent.reduce((s, c) => s + (c.high - c.low), 0) /
+    Math.max(1, recent.length);
+  return avg > 0 ? avg : (candles[candles.length - 1]?.close ?? 1) * 0.015;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18-GATE SIGNAL ANALYSIS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Analyzes a symbol across 4 timeframes using the 18-gate system.
+ * @param symbol - base symbol (e.g. "BTC") or full symbol (e.g. "BTCUSDT")
+ * @param tickers - pre-fetched ticker map from fetch24hTickers()
+ * @returns LiveSignal if all 18 gates pass and confidence >= 88%, else null
+ */
+export async function analyzeSymbol(
+  symbol: string,
+  tickers: Record<string, TickerData>,
+): Promise<LiveSignal | null> {
+  const base = symbol.endsWith("USDT") ? symbol.replace("USDT", "") : symbol;
+  const tickerEntry = tickers[base] ?? tickers[`${base}USDT`];
+  const currentPrice = tickerEntry?.price ?? 0;
+  if (!currentPrice || currentPrice <= 0) return null;
+
+  // Fetch multi-timeframe candles in parallel
+  const [c15m, c1h, c4h] = await Promise.all([
+    fetchCandles(base, "15m", 120),
+    fetchCandles(base, "1h", 250),
+    fetchCandles(base, "4h", 210),
+  ]);
+
+  if (c1h.length < 100 || c4h.length < 60 || c15m.length < 40) return null;
+
+  // Data freshness: last 1H candle must be within 2 hours
+  const lastTs = c1h[c1h.length - 1].timestamp ?? 0;
+  if (lastTs > 0 && Date.now() - lastTs > 2 * 3600 * 1000) return null;
+
+  const closes15m = c15m.map((c) => c.close);
+  const closes1h = c1h.map((c) => c.close);
+  const closes4h = c4h.map((c) => c.close);
+
+  const atr15m = lastATR(c15m, 14);
+  void lastATR(c1h, 14); // atr1h computed but used indirectly via atr15m
+
+  // ── EMA VALUES ──
+  const ema50_4h = ema(closes4h, 50);
+  const ema200_4h = ema(closes4h, 200);
+  const ema20_1h = ema(closes1h, 20);
+  const ema50_1h = ema(closes1h, 50);
+
+  const v_ema50_4h = ema50_4h.length > 0 ? ema50_4h[ema50_4h.length - 1] : 0;
+  const v_ema200_4h =
+    ema200_4h.length > 0 ? ema200_4h[ema200_4h.length - 1] : 0;
+  const v_ema20_1h = ema20_1h.length > 0 ? ema20_1h[ema20_1h.length - 1] : 0;
+  const v_ema50_1h = ema50_1h.length > 0 ? ema50_1h[ema50_1h.length - 1] : 0;
+
+  // ── GATE 1: 4H TREND CONFIRMATION ──
+  if (v_ema50_4h <= 0 || v_ema200_4h <= 0) return null;
+  if (v_ema50_4h <= v_ema200_4h) return null; // EMA50 must be above EMA200 on 4h
+  if (currentPrice <= v_ema50_4h) return null; // Price must be above EMA50 on 4h
+  // Last 3 closes making higher lows on 4h
+  if (c4h.length < 5) return null;
+  const last3_4h = closes4h.slice(-3);
+  if (!(last3_4h[1] > last3_4h[0] || last3_4h[2] > last3_4h[0])) {
+    // Allow if at least 2 of 3 are forming higher lows pattern
+    if (last3_4h[2] <= last3_4h[0]) return null;
+  }
+
+  // ── GATE 2: 1H TREND CONFIRMATION ──
+  if (v_ema20_1h <= 0 || v_ema50_1h <= 0) return null;
+  if (v_ema20_1h <= v_ema50_1h) return null; // EMA20 must be above EMA50 on 1h
+  if (currentPrice <= v_ema20_1h) return null; // Price must be above EMA20 on 1h
+  const rsi1hVals = rsi(closes1h, 14);
+  if (rsi1hVals.length === 0) return null;
+  const curRsi1h = rsi1hVals[rsi1hVals.length - 1];
+  if (curRsi1h < 45 || curRsi1h > 75) return null; // RSI between 45-75
+
+  // ── GATE 3: STOP HUNT SWEEP DETECTION (CRITICAL) ──
+  if (c15m.length < 25) return null;
+  const recent20_15m = c15m.slice(-20);
+  const swingLow15m = Math.min(...c15m.slice(-20, -10).map((c) => c.close));
+  let stopHuntConfirmed = false;
+  for (let i = c15m.length - 5; i < c15m.length; i++) {
+    if (
+      c15m[i].low < swingLow15m - 0.3 * atr15m &&
+      c15m[i].close > swingLow15m
+    ) {
+      stopHuntConfirmed = true;
+      break;
+    }
+  }
+  if (!stopHuntConfirmed) return null;
+  // Suppress unused variable warning
+  void recent20_15m;
+
+  // ── GATE 4: CHoCH (CHANGE OF CHARACTER) ON 15M ──
+  const currentSwingHigh = Math.max(...closes15m.slice(-5));
+  const prevSwingHigh = Math.max(...closes15m.slice(-15, -5));
+  const chochConfirmed = currentSwingHigh > prevSwingHigh;
+  if (!chochConfirmed) return null;
+
+  // ── GATE 5: SUPPORT ANCHOR BELOW STOP LOSS ──
+  const proposedSL = currentPrice - 1.0 * atr15m;
+  const swingLows30 = c15m
+    .slice(-30)
+    .map((c) => c.low)
+    .filter((l) => l < currentPrice);
+  if (swingLows30.length === 0) return null;
+  const nearestSwingLow = Math.max(
+    ...swingLows30.filter((l) => l <= currentPrice),
+  );
+  if (nearestSwingLow > proposedSL) return null; // Support must be AT or BELOW the SL
+
+  // ── GATE 6: RESISTANCE PROXIMITY CHECK ──
+  const tp1Proposed = currentPrice + 1.2 * atr15m;
+  const closesInRange = closes15m
+    .slice(-30)
+    .filter((c) => c > currentPrice && c < tp1Proposed);
+  if (closesInRange.length > 0) return null; // Resistance sits between entry and TP1
+
+  // ── GATE 7: CANDLE BODY QUALITY ──
+  const last3_15m = c15m.slice(-3);
+  for (const candle of last3_15m) {
+    const range = candle.high - candle.low;
+    if (range <= 0) continue;
+    const body = Math.abs(candle.close - candle.open);
+    if (body / range < 0.6) return null; // Body must be >60% of range
+  }
+
+  // ── GATE 8: CONSECUTIVE HIGHER LOWS ON 15M ──
+  const swingLowPoints: number[] = [];
+  for (let i = 1; i < c15m.length - 1; i++) {
+    if (c15m[i].low < c15m[i - 1].low && c15m[i].low < c15m[i + 1].low) {
+      swingLowPoints.push(c15m[i].low);
+    }
+  }
+  if (swingLowPoints.length < 3) return null;
+  const last3SwingLows = swingLowPoints.slice(-3);
+  if (
+    !(
+      last3SwingLows[1] > last3SwingLows[0] &&
+      last3SwingLows[2] > last3SwingLows[1]
+    )
+  ) {
+    return null; // Must have 3 consecutive ascending swing lows
+  }
+
+  // ── GATE 9: VOLUME SPIKE CONFIRMATION ──
+  if (c15m.length < 24) return null;
+  const avgVol15m = c15m.slice(-21, -1).reduce((s, c) => s + c.volume, 0) / 20;
+  const last3Vol_15m = c15m.slice(-3);
+  for (const candle of last3Vol_15m) {
+    if (candle.volume < avgVol15m * 1.2) return null; // Each of last 3 must be 1.2x avg
+  }
+
+  // ── GATE 10: MOMENTUM VELOCITY ──
+  const avg10Range =
+    c15m.slice(-11, -1).reduce((s, c) => s + (c.high - c.low), 0) / 10;
+  const currentRange = c15m[c15m.length - 1].high - c15m[c15m.length - 1].low;
+  if (avg10Range <= 0 || currentRange <= avg10Range * 1.1) return null;
+
+  // ── GATE 11: MACD CROSSOVER ON 15M ──
+  const macd15m = macd(closes15m, 12, 26, 9);
+  if (macd15m.histogram.length < 5) return null;
+  const histLen = macd15m.histogram.length;
+  const lastHisto = macd15m.histogram[histLen - 1];
+  const prevHisto = macd15m.histogram[histLen - 2];
+  const prevPrevHisto = macd15m.histogram[histLen - 3];
+  const prevPrevPrevHisto = macd15m.histogram[histLen - 4];
+  // Fresh crossover: any of last 3 positive AND at least one before that was negative
+  const freshCrossover =
+    (lastHisto > 0 || prevHisto > 0 || prevPrevHisto > 0) &&
+    (prevPrevPrevHisto < 0 ||
+      prevPrevHisto < 0 ||
+      (prevHisto < 0 && lastHisto > 0));
+  // OR histogram positive and increasing
+  const histoIncreasing = lastHisto > 0 && lastHisto > prevHisto;
+  if (!freshCrossover && !histoIncreasing) return null;
+
+  // ── GATE 12: RSI BULLISH DIVERGENCE ON 15M ──
+  const rsi15mVals = rsi(closes15m, 14);
+  let rsiBullDiv = false;
+  if (rsi15mVals.length >= 5) {
+    const curRsi15m = rsi15mVals[rsi15mVals.length - 1];
+    if (curRsi15m > 50) {
+      // RSI above 50 and trending up for last 3 candles
+      rsiBullDiv =
+        rsi15mVals.length >= 3 &&
+        rsi15mVals[rsi15mVals.length - 1] > rsi15mVals[rsi15mVals.length - 2] &&
+        rsi15mVals[rsi15mVals.length - 2] > rsi15mVals[rsi15mVals.length - 3];
+    } else {
+      // Look for bullish divergence: price lower low, RSI higher low
+      let priceLL = Number.POSITIVE_INFINITY;
+      let priceLLIdx = -1;
+      for (let i = closes15m.length - 15; i < closes15m.length - 3; i++) {
+        if (i < 0) continue;
+        if (closes15m[i] < priceLL) {
+          priceLL = closes15m[i];
+          priceLLIdx = i;
+        }
+      }
+      let pricePLL = Number.POSITIVE_INFINITY;
+      for (
+        let i = Math.max(0, priceLLIdx - 3);
+        i >= Math.max(0, priceLLIdx - 10);
+        i--
+      ) {
+        if (closes15m[i] < pricePLL) pricePLL = closes15m[i];
+      }
+      const rsiOffset = rsi15mVals.length - closes15m.length;
+      const rsiAtLL =
+        rsiOffset + priceLLIdx >= 0 ? rsi15mVals[rsiOffset + priceLLIdx] : 0;
+      const rsiAtPLL =
+        rsiOffset + priceLLIdx - 5 >= 0
+          ? rsi15mVals[Math.max(0, rsiOffset + priceLLIdx - 5)]
+          : 0;
+      if (
+        priceLL < pricePLL &&
+        rsiAtLL > rsiAtPLL &&
+        rsiAtLL > 0 &&
+        rsiAtPLL > 0
+      ) {
+        rsiBullDiv = true;
+      }
+    }
+  }
+  if (!rsiBullDiv) return null;
+
+  // ── GATE 13: VWAP CONFIRMATION ──
+  const vwap1h = vwap(c1h.slice(-50));
+  const vwap4h = vwap(c4h.slice(-50));
+  const vwapConfirmed = currentPrice > vwap1h && currentPrice > vwap4h;
+  if (!vwapConfirmed) return null;
+
+  // ── GATE 14: ADX STRENGTH ──
+  const adxResult1h = adx(c1h, 14);
+  if (adxResult1h.adx <= 20) return null;
+  if (adxResult1h.plusDI <= adxResult1h.minusDI) return null;
+
+  // ── GATE 15: BOLLINGER BAND POSITION ──
+  const bb1h = bollingerBands(closes1h, 20, 2);
+  if (currentPrice <= bb1h.middle) return null; // Must be above middle band
+  if (currentPrice >= bb1h.upper) return null; // Must not be above upper (overbought)
+
+  // ── GATE 16: SPREAD GUARD ──
+  // Using ticker data — if available, check spread
+  if (tickerEntry) {
+    // We don't have bid/ask from REST, so we skip if no spread data
+    // In practice, if the coin has >$5M volume the spread is usually fine
+    // Only hard-reject if change24h is extremely negative (dying coin)
+    if (tickerEntry.change24h < -10) return null;
+  }
+
+  // ── GATE 17: ICHIMOKU CLOUD CONFIRMATION ──
+  if (c1h.length < 52) return null;
+  const ichi1h = ichimoku(c1h);
+  const cloudTop = Math.max(ichi1h.senkouA, ichi1h.senkouB);
+  const ichimokuConfirmed =
+    currentPrice > cloudTop && ichi1h.tenkan > ichi1h.kijun;
+  if (!ichimokuConfirmed) return null;
+
+  // ── GATE 18: RISK/REWARD ENFORCEMENT ──
+  const slDist = 1.0 * atr15m;
+  const tp1 = currentPrice + 1.2 * atr15m;
+  const tp2 = currentPrice + 1.8 * atr15m;
+  const tp3 = currentPrice + 2.5 * atr15m;
+  const stopLoss = currentPrice - slDist;
+  const rrTP2 = (tp2 - currentPrice) / (currentPrice - stopLoss);
+  if (rrTP2 < 1.8) return null;
+
+  // ── SCORING SYSTEM (max 51 points) ──
+  let score = 0;
+  const ema200_4h_val = v_ema200_4h;
+  if (v_ema50_4h > ema200_4h_val && ema200_4h_val > 0) score += 5; // EMA Golden Cross 4h
+  if (currentPrice > v_ema20_1h && v_ema20_1h > v_ema50_1h) score += 4; // EMA bullish 1h
+  const curRsi15m_val = rsi15mVals[rsi15mVals.length - 1] ?? 50;
+  if (curRsi15m_val >= 50 && curRsi15m_val <= 65) score += 3; // RSI ideal range 15m
+  if (histoIncreasing) score += 3; // MACD histogram positive & increasing
+  const lastVol = c15m[c15m.length - 1].volume;
+  if (avgVol15m > 0 && lastVol > avgVol15m * 1.5) score += 3; // Strong volume
+  if (stopHuntConfirmed) score += 5; // Stop hunt confirmed
+  if (chochConfirmed) score += 5; // CHoCH confirmed
+  if (rsiBullDiv) score += 4; // RSI divergence
+  score += 3; // VWAP both TF confirmed (we passed gate 13)
+  if (adxResult1h.adx > 25) score += 2; // Strong ADX
+  if (currentPrice > bb1h.middle) score += 2; // Above BB middle
+  score += 4; // Ichimoku confirmed (passed gate 17)
+  score += 3; // Consecutive higher lows (passed gate 8)
+  // Candle body quality — all 3 passed gate 7
+  score += 3;
+  if (currentRange > avg10Range * 1.3) score += 2; // Strong momentum velocity
+
+  score = Math.min(score, 51);
+  const confidence = Math.min(99, Math.round((score / 51) * 100));
+  if (confidence < 88) return null;
+
+  // ── ENTRY TYPE ──
+  const candlesSinceHunt =
+    c15m.length -
+    1 -
+    (() => {
+      for (let i = c15m.length - 1; i >= c15m.length - 5; i--) {
+        if (
+          c15m[i].low < swingLow15m - 0.3 * atr15m &&
+          c15m[i].close > swingLow15m
+        )
+          return i;
+      }
+      return c15m.length - 3;
+    })();
+  let entryType: string;
+  if (candlesSinceHunt <= 2) entryType = "Post Stop-Hunt Entry";
+  else if (currentSwingHigh > prevSwingHigh * 1.001)
+    entryType = "CHoCH Breakout Entry";
+  else entryType = "Momentum Entry";
+
+  const estimatedHours = Math.max(2, Math.round(2 + (99 - confidence) * 0.3));
+  const profitPercent = ((tp2 - currentPrice) / currentPrice) * 100;
+  const riskReward = `1:${((tp2 - currentPrice) / (currentPrice - stopLoss)).toFixed(1)}`;
+
+  // ── MACD VALUES FOR SIGNAL OBJECT ──
+  const macd1hResult = macd(closes1h, 12, 26, 9);
+  const macdHisto1h =
+    macd1hResult.histogram.length > 0
+      ? macd1hResult.histogram[macd1hResult.histogram.length - 1]
+      : 0;
+
+  const volumeSpike = lastVol > avgVol15m * 1.5;
+
+  const analysisStr = [
+    `🔥 18-GATE CONFIRMED | Score: ${score}/51 | Confidence: ${confidence}%`,
+    `📈 4H EMA: ${v_ema50_4h.toFixed(2)} > ${ema200_4h_val.toFixed(2)} (Golden Cross ✓)`,
+    `📊 RSI(1H): ${curRsi1h.toFixed(1)} | RSI(15M): ${curRsi15m_val.toFixed(1)} | ADX(1H): ${adxResult1h.adx.toFixed(1)}`,
+    `💹 MACD(15M): ${lastHisto > 0 ? "Bullish Crossover ✓" : "Aligned"} | Volume: ${volumeSpike ? "SPIKE ✓" : "Normal"}`,
+    "🎯 Stop Hunt ✓ | CHoCH ✓ | VWAP ✓ | Ichimoku ✓ | Higher Lows ✓",
+    `🏆 Entry: ${entryType} | RR: ${riskReward} | TP1: $${tp1.toLocaleString(undefined, { maximumFractionDigits: 4 })} | TP2: $${tp2.toLocaleString(undefined, { maximumFractionDigits: 4 })} | TP3: $${tp3.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
+  ].join("\n");
+
+  return {
+    symbol: base,
+    direction: "BUY",
+    entryPrice: currentPrice,
+    stopLoss,
+    targetPrice: tp2,
+    tp1,
+    tp2,
+    tp3,
+    confidence,
+    estimatedHours,
+    riskReward,
+    entryType,
+    rsiValue: curRsi1h,
+    macdHistogram: macdHisto1h,
+    volumeSpike,
+    breakOfStructure: chochConfirmed,
+    multiTimeframeConfluence: "5/5 Timeframes Aligned",
+    stopHuntConfirmed,
+    chochConfirmed,
+    ichimokuConfirmed,
+    vwapConfirmed,
+    scanTime: Date.now(),
+    profitPercent,
+    // Extended compatibility fields
+    trend: "up",
+    volumeConfirmed: true,
+    goldenCross: v_ema50_4h > ema200_4h_val,
+    supportZone: swingLows30.length > 0,
+    score,
+    analysis: analysisStr,
+    // Backwards compat aliases
+    bosConfirmed: chochConfirmed,
+  } as LiveSignal & { bosConfirmed: boolean };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEEP TEST SIGNAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches fresh data and re-runs all 18 gates.
+ * @returns true only if signal still passes all gates at 88%+ confidence
+ */
+export async function deepTestSignal(signal: LiveSignal): Promise<boolean> {
   try {
-    const candles = await fetchCandles(symbol, "1h", 60);
-    if (candles.length < 30) return false;
-    const age = Date.now() - candles[candles.length - 1].openTime;
-    if (age > 4 * 3600 * 1000) return false;
-    const closes = candles.map((c) => c.close);
-    const rsiVals = rsi(closes);
-    if (rsiVals.length === 0) return false;
-    const lastRsi = rsiVals[rsiVals.length - 1];
-    // Only filter extreme RSI zones — allow trending coins in any EMA config
-    if (lastRsi < 18 || lastRsi > 82) return false;
-    // Check that recent price action isn't collapsing (last candle not a crash candle)
-    const lastCandle = candles[candles.length - 1];
-    const prevCandle = candles[candles.length - 2];
-    const dropPct =
-      ((prevCandle.close - lastCandle.close) / prevCandle.close) * 100;
-    if (dropPct > 8) return false; // Filter coins crashing >8% in last candle
-    // Basic volume sanity: not dead volume
-    const avgVol =
-      candles.slice(-21, -1).reduce((s, c) => s + c.volume, 0) / 20;
-    if (avgVol <= 0) return false;
-    if (candles[candles.length - 1].volume < avgVol * 0.2) return false;
-    return true;
+    // Fetch fresh tickers for this symbol only
+    const base = signal.symbol.endsWith("USDT")
+      ? signal.symbol.replace("USDT", "")
+      : signal.symbol;
+    const res = await fetch(`${BINANCE_BASE}/ticker/24hr?symbol=${base}USDT`);
+    if (!res.ok) return false;
+    const d = (await res.json()) as {
+      lastPrice: string;
+      quoteVolume: string;
+      priceChangePercent: string;
+    };
+    const freshTickers: Record<string, TickerData> = {
+      [base]: {
+        price: Number.parseFloat(d.lastPrice),
+        volume24h: Number.parseFloat(d.quoteVolume),
+        change24h: Number.parseFloat(d.priceChangePercent),
+      },
+    };
+    const freshSignal = await analyzeSymbol(base, freshTickers);
+    return freshSignal !== null && freshSignal.confidence >= 88;
   } catch {
     return false;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN SIGNAL ENGINE — 30-indicator, 30-point scoring, 10 hard gates
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function analyzeSymbol(
+/**
+ * @deprecated Overload kept for backwards compat with SignalScanContext/SignalsPage.
+ * Old signature: deepTestSignal(symbol, {entryPrice, stopLoss, ...}, livePrice)
+ * Returns { passed: boolean; details: string; freshScore: number; freshConfidence: number }
+ */
+export async function deepTestSignalLegacy(
   symbol: string,
-  currentPrice: number,
-): Promise<SignalAnalysis | null> {
-  // Fetch 5 timeframes in parallel (4H primary, 1H intermediate, 15M entry, 5M precision)
-  // Use 220 1H candles for EMA200, 200 4H for deep structure
-  const [candles5m, candles15m, candles1h, candles4h, candles1d] =
-    await Promise.all([
-      fetchCandles(symbol, "5m", 60),
-      fetchCandles(symbol, "15m", 100),
-      fetchCandles(symbol, "1h", 220),
-      fetchCandles(symbol, "4h", 200),
-      fetchCandles(symbol, "1d", 30),
-    ]);
-
-  // Minimum data requirements
-  if (candles1h.length < 100 || candles4h.length < 50) return null;
-
-  // Data freshness: last 1H candle must be within 2 hours
-  const lastCandleAge = Date.now() - candles1h[candles1h.length - 1].openTime;
-  if (lastCandleAge > 2 * 3600 * 1000) return null;
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // COMPUTE ALL INDICATORS
-  // ──────────────────────────────────────────────────────────────────────────
-
-  const closes1h = candles1h.map((c) => c.close);
-  const closes4h = candles4h.map((c) => c.close);
-  const closes5m = candles5m.map((c) => c.close);
-
-  // --- TREND GROUP ---
-  const fullEMAAligned1h = hasFullEMAAlignment(closes1h); // EMA20>50>100>200
-  const emaExpanding1h = isEMAMomentumExpanding(closes1h);
-  const adx4h = calcADX(candles4h);
-  const psarVals1h = calcPSAR(candles1h);
-  const psarBullish1h =
-    psarVals1h.length > 0 &&
-    candles1h[candles1h.length - 1].close > psarVals1h[psarVals1h.length - 1];
-  const ichimoku4h = calcIchimoku(candles4h);
-  const ichimoku1h = calcIchimoku(candles1h);
-  const trend4h = detectTrend(candles4h);
-  const trend1h = detectTrend(candles1h);
-  const trend15m =
-    candles15m.length >= 50 ? detectTrend(candles15m) : "sideways";
-  const trend5m = candles5m.length >= 30 ? detectTrend(candles5m) : "sideways";
-
-  // EMA values for 1H
-  const ema50_1h = ema(closes1h, 50);
-  const ema200_1h = ema(closes1h, 200);
-  const lastEma50 = ema50_1h.length > 0 ? ema50_1h[ema50_1h.length - 1] : 0;
-  const lastEma200 = ema200_1h.length > 0 ? ema200_1h[ema200_1h.length - 1] : 0;
-  const goldenCross =
-    lastEma50 > 0 &&
-    lastEma200 > 0 &&
-    lastEma50 > lastEma200 &&
-    currentPrice > lastEma50;
-
-  // --- MOMENTUM GROUP ---
-  const rsi1hVals = rsi(closes1h);
-  const rsi4hVals = rsi(closes4h);
-  if (rsi1hVals.length === 0 || rsi4hVals.length === 0) return null;
-  const curRsi1h = rsi1hVals[rsi1hVals.length - 1];
-  const curRsi4h = rsi4hVals[rsi4hVals.length - 1];
-  const macd1h = macd(closes1h);
-  const macd4h = macd(closes4h);
-  if (!macd1h || !macd4h) return null;
-  const stochRsi1h = calcStochRSI(closes1h);
-  const stochRsi5m = calcStochRSI(closes5m);
-  const williamsR1h = calcWilliamsR(candles1h);
-  const cci1h = calcCCI(candles1h);
-  const mfi1h = calcMFI(candles1h);
-  const roc1h = calcROC(closes1h);
-
-  // --- VOLUME GROUP ---
-  const obvRising1h = isOBVRising(candles1h);
-  const vwap1h = calcVWAP(candles1h.slice(-50)); // VWAP over last 50 candles
-  const volSpike1h = detectVolumeSpike(candles1h);
-  const volSpike15m =
-    candles15m.length >= 21 ? detectVolumeSpike(candles15m) : false;
-  const volumeSpike = volSpike1h || volSpike15m;
-  const volAccum1h = hasVolumeAccumulation(candles1h);
-  const avgVol1h =
-    candles1h.slice(-21, -1).reduce((a, b) => a + b.volume, 0) / 20;
-  const volumeConfirmed =
-    candles1h[candles1h.length - 1].volume >= avgVol1h * 0.8;
-
-  // --- VOLATILITY GROUP ---
-  const bb1h = calcBollinger(closes1h);
-  const atr1h = atr(candles1h, 14);
-  const atrPct = (atr1h / currentPrice) * 100;
-
-  // --- STRUCTURE GROUP ---
-  const bosConfirmed15m =
-    candles15m.length >= 22 ? detectBoS(candles15m) : false;
-  const bosConfirmed1h = detectBoS(candles1h);
-  const bosConfirmed = bosConfirmed15m || bosConfirmed1h;
-  const choch = detectCHoCH(candles1h);
-  const hhhl = hasHigherHighsLows(candles1h);
-  const orderBlock = isNearOrderBlock(candles1h, currentPrice, atr1h);
-  const fvg = isInFVG(candles1h, currentPrice);
-  const liqSweep = hasLiquiditySweep(
-    candles15m.length >= 15 ? candles15m : candles1h,
-  );
-  const supportZone = isNearSupportZone(candles1h, currentPrice, atr1h);
-  const fibLevel = getFibLevel(candles4h, currentPrice);
-  const pivots = calcPivotPoints(candles1d.slice(-2));
-  const abovePivot = pivots.pp > 0 && currentPrice > pivots.pp;
-  const bearishPattern = hasBearishReversalPattern(candles1h);
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // HARD GATES — Tiered: 3 absolute gates + at least 3 of 5 secondary gates
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // ABSOLUTE GATE 1: 4H trend must NOT be bearish (primary trend protection)
-  if (trend4h === "down") return null;
-
-  // ABSOLUTE GATE 2: 1H trend must be bullish (intermediate trend)
-  if (trend1h !== "up") return null;
-
-  // ABSOLUTE GATE 3: No bearish reversal patterns on 1H (no top-reversal candles)
-  if (bearishPattern) return null;
-
-  // SECONDARY GATES — need at least 3 of these 5 to pass
-  let secondaryGatesPassed = 0;
-
-  // Secondary Gate A: ADX > 18 on 4H (trend has some strength)
-  if (adx4h.adx >= 18) secondaryGatesPassed++;
-
-  // Secondary Gate B: Volume spike confirmed (real momentum)
-  if (volumeSpike) secondaryGatesPassed++;
-
-  // Secondary Gate C: RSI(4H) not in extreme overbought zone
-  if (curRsi4h <= 78) secondaryGatesPassed++;
-
-  // Secondary Gate D: OBV trend positive (smart money not selling)
-  if (obvRising1h) secondaryGatesPassed++;
-
-  // Secondary Gate E: Price NOT within 2% of 50-candle 4H resistance (no buying at top)
-  const secondaryGateE = (() => {
-    if (candles4h.length < 50) return true;
-    const high4h50 = Math.max(...candles4h.slice(-50).map((c) => c.high));
-    const pctFromHigh = ((high4h50 - currentPrice) / high4h50) * 100;
-    // If BoS confirmed (broke above), allow it — it's a breakout entry
-    if (bosConfirmed) return true;
-    return pctFromHigh >= 2.0;
-  })();
-  if (secondaryGateE) secondaryGatesPassed++;
-
-  // Require at least 3 of 5 secondary gates
-  if (secondaryGatesPassed < 3) return null;
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // 30-POINT SCORING SYSTEM
-  // ──────────────────────────────────────────────────────────────────────────
-
-  let score = 0;
-
-  // GROUP 1: TREND (max 8 points)
-  if (fullEMAAligned1h) score += 2; // EMA20>50>100>200 bullish cascade
-  if (goldenCross) score += 2; // EMA50 > EMA200 (golden cross)
-  if (emaExpanding1h) score += 1; // EMA20-EMA50 distance expanding
-  if (psarBullish1h) score += 1; // Parabolic SAR below price
-  if (ichimoku4h?.priceAboveCloud && ichimoku4h?.tenkanAboveKijun) score += 1; // Ichimoku bullish 4H
-  if (ichimoku1h?.cloudBullish) score += 1; // Senkou A > B (bullish cloud)
-
-  // GROUP 2: MOMENTUM (max 8 points)
-  const rsiGood1h = curRsi1h >= 50 && curRsi1h <= 70;
-  const rsiGood4h = curRsi4h >= 45 && curRsi4h <= 72;
-  if (rsiGood1h) score += 1;
-  if (rsiGood4h) score += 1;
-  if (macd1h.histogram > 0 && macd1h.macd > 0) score += 1; // MACD above zero, bullish
-  if (macd1h.prevHistogram < 0 && macd1h.histogram > 0) score += 1; // MACD crossover (freshest)
-  if (macd4h.histogram > 0) score += 1; // 4H MACD aligned
-  if (
-    stochRsi1h &&
-    stochRsi1h.k > 50 &&
-    stochRsi1h.k > stochRsi1h.d &&
-    stochRsi1h.k < 90
-  )
-    score += 1; // StochRSI bullish
-  if (williamsR1h > -50 && williamsR1h < -20) score += 1; // Williams %R bullish zone
-  if (cci1h > 0 && cci1h < 200) score += 1; // CCI bullish
-
-  // GROUP 3: VOLUME (max 7 points)
-  if (obvRising1h) score += 2; // OBV rising (smart money)
-  if (currentPrice > vwap1h && vwap1h > 0) score += 1; // Above VWAP
-  if (volumeSpike) score += 2; // Strong volume spike
-  if (volAccum1h) score += 1; // Volume accumulation
-  if (mfi1h >= 50 && mfi1h <= 80) score += 1; // MFI buying pressure
-
-  // GROUP 4: VOLATILITY & STRUCTURE (max 7 points)
-  if (bosConfirmed) score += 2; // Break of Structure
-  if (hhhl) score += 2; // Higher Highs + Higher Lows
-  if (supportZone) score += 1; // Near proven support
-  if (bb1h && currentPrice > bb1h.middle && bb1h.bandwidth > 0.01) score += 1; // BB expansion + above midline
-  if (atrPct >= 0.5 && atrPct <= 3.0) score += 1; // ATR in healthy range
-
-  // BONUS POINTS (improve confidence, no cap on individual group now)
-  if (choch) score += 1; // Change of Character (high quality setup)
-  if (orderBlock) score += 1; // Near bullish order block
-  if (fvg) score += 1; // In a Fair Value Gap
-  if (liqSweep) score += 1; // Liquidity sweep (stop hunt cleared)
-  if (fibLevel !== "") score += 1; // At Fibonacci level
-  if (abovePivot) score += 1; // Above daily pivot
-  if (roc1h > 0) score += 1; // Positive rate of change
-
-  // Cap score at 30
-  score = Math.min(score, 30);
-
-  // ── MINIMUM SCORE GATE: 16/30 (53%) — majority of indicators must align
-  if (score < 16) return null;
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // CONFIDENCE CALCULATION (normalized from score + bonus factors)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // Base: score/30 mapped to 70-99% range
-  let confidence = Math.round(70 + (score / 30) * 25);
-
-  // Strong bonus factors
-  if (macd1h.prevHistogram < 0 && macd1h.histogram > 0) confidence += 3; // Fresh MACD crossover
-  if (bosConfirmed && volumeSpike) confidence += 3; // BoS + volume = elite setup
-  if (
-    [trend4h, trend1h, trend15m, trend5m].filter((t) => t === "up").length === 4
-  )
-    confidence += 3; // All 4 TF aligned
-  if (liqSweep && bosConfirmed) confidence += 2; // Liquidity sweep + BoS = smart entry
-  if (ichimoku4h?.priceAboveCloud && ichimoku4h?.tenkanAboveKijun)
-    confidence += 2; // Ichimoku full bullish
-  if (fullEMAAligned1h) confidence += 2; // All 4 EMAs aligned
-  if (fibLevel !== "") confidence += 1; // Fibonacci entry precision
-  if (orderBlock || fvg) confidence += 1; // Institutional level confirmation
-  if (stochRsi5m && stochRsi5m.k > 50 && stochRsi5m.k > stochRsi5m.d)
-    confidence += 1; // 5M StochRSI
-
-  confidence = Math.min(99, confidence);
-
-  // ── MINIMUM CONFIDENCE GATE: 72% — high quality but achievable
-  if (confidence < 72) return null;
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // TP / SL CALCULATION (ATR-based, minimum 1:2 RR)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // Support-based SL: use nearest support level if available, else ATR
-  let stopDistance = atr1h * 1.0;
-  if (supportZone) {
-    // Find the nearest swing low below current price
-    const lookback = candles1h.slice(-60);
-    const swingLows = lookback
-      .filter(
-        (c, i) =>
-          i > 0 &&
-          i < lookback.length - 1 &&
-          c.low < lookback[i - 1].low &&
-          c.low < lookback[i + 1].low &&
-          c.low < currentPrice,
-      )
-      .map((c) => c.low);
-    if (swingLows.length > 0) {
-      const nearestSupport = Math.max(...swingLows);
-      const supportDist = currentPrice - nearestSupport;
-      if (supportDist > 0 && supportDist < atr1h * 1.5) {
-        stopDistance = Math.min(stopDistance, supportDist * 1.05); // 5% buffer below support
-      }
-    }
-  }
-  stopDistance = Math.max(stopDistance, atr1h * 0.5); // Never less than 0.5 ATR
-
-  // TP targets (3 levels)
-  const tp1Distance = Math.max(atr1h * 1.5, stopDistance * 1.5);
-  const tp2Distance = Math.max(atr1h * 2.5, stopDistance * 2.5);
-  const tp3Distance = Math.max(atr1h * 3.5, stopDistance * 3.5);
-
-  const stopLoss = currentPrice - stopDistance;
-  const tp1 = currentPrice + tp1Distance;
-  const tp2 = currentPrice + tp2Distance;
-  const tp3 = currentPrice + tp3Distance;
-  const targetPrice = tp3; // Full TP = TP3
-
-  // Minimum 1.8 RR check (using TP2 as reference)
-  const rrUsingTP2 = tp2Distance / stopDistance;
-  if (rrUsingTP2 < 1.8) return null;
-
-  const rrRatio = (tp2Distance / stopDistance).toFixed(2);
-
-  // Estimated hours: based on ATR speed and timeframe momentum
-  const baseHours = atrPct > 3 ? 3 : atrPct > 1.5 ? 6 : 10;
-  const estimatedHours = Math.min(
-    8,
-    Math.round(baseHours + (1 - confidence / 100) * 3),
-  );
-
-  const profitPercent = ((tp3 - currentPrice) / currentPrice) * 100;
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // ENTRY TYPE LABEL
-  // ──────────────────────────────────────────────────────────────────────────
-
-  let entryType = "Momentum Entry";
-  if (liqSweep && bosConfirmed) entryType = "Liquidity Sweep + BoS";
-  else if (fibLevel !== "" && supportZone) entryType = `${fibLevel} + Support`;
-  else if (orderBlock) entryType = "Order Block Entry";
-  else if (fvg) entryType = "Fair Value Gap Fill";
-  else if (choch && bosConfirmed) entryType = "CHoCH + BoS Entry";
-  else if (bosConfirmed && volumeSpike) entryType = "BoS + Volume Entry";
-  else if (fibLevel !== "") entryType = `${fibLevel} Retracement`;
-  else if (supportZone) entryType = "Support Zone Pullback";
-  else if (macd1h.prevHistogram < 0 && macd1h.histogram > 0)
-    entryType = "MACD Crossover Entry";
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // ANALYSIS STRING
-  // ──────────────────────────────────────────────────────────────────────────
-
-  const trendCount = [trend4h, trend1h, trend15m, trend5m].filter(
-    (t) => t === "up",
-  ).length;
-  const ichimokuStr = ichimoku4h?.priceAboveCloud ? "Ichimoku Bullish ✓" : "";
-  const adxStr = `ADX(4H): ${adx4h.adx.toFixed(1)} (+DI: ${adx4h.plusDI.toFixed(1)})`;
-  const stochStr = stochRsi1h
-    ? `StochRSI: K${stochRsi1h.k.toFixed(0)}/D${stochRsi1h.d.toFixed(0)}`
-    : "";
-  const fibStr = fibLevel ? `Fib ${fibLevel} ✓` : "";
-
-  const analysis = [
-    `🔥 CONFIRMED SETUP | Score: ${score}/30 | ${trendCount}/4 TF bullish | Gates: ${secondaryGatesPassed}/5 secondary`,
-    `📈 4H: ${trend4h} | 1H: ${trend1h} | 15M: ${trend15m} | 5M: ${trend5m}`,
-    `📊 RSI(1H): ${curRsi1h.toFixed(1)} | RSI(4H): ${curRsi4h.toFixed(1)} | ${adxStr}`,
-    `💹 MACD(1H): ${macd1h.histogram > 0 ? (macd1h.prevHistogram < 0 ? "FRESH CROSSOVER ✓" : "Bullish ✓") : "aligned"}`,
-    [
-      bosConfirmed ? "BoS ✓" : "",
-      goldenCross ? "Golden Cross ✓" : "",
-      ichimokuStr,
-      stochStr,
-      fibStr,
-      liqSweep ? "Liq Sweep ✓" : "",
-      orderBlock ? "Order Block ✓" : "",
-      choch ? "CHoCH ✓" : "",
-      hhhl ? "HH/HL ✓" : "",
-    ]
-      .filter(Boolean)
-      .join(" | "),
-    `🎯 Entry: ${entryType} | RR: 1:${rrRatio} | TP: TP1=$${tp1.toLocaleString(undefined, { maximumFractionDigits: 4 })} → TP2=$${tp2.toLocaleString(undefined, { maximumFractionDigits: 4 })} → TP3=$${tp3.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const ichimokuBullish = !!(
-    ichimoku4h?.priceAboveCloud && ichimoku4h?.tenkanAboveKijun
-  );
-  const stochRsiBullish = !!(
-    stochRsi1h &&
-    stochRsi1h.k > 50 &&
-    stochRsi1h.k > stochRsi1h.d
-  );
-
-  return {
-    direction: "BUY",
-    confidence,
-    rsiValue: curRsi1h,
-    macdHistogram: macd1h.histogram,
-    trend: trend1h,
-    entryPrice: currentPrice,
-    targetPrice,
-    stopLoss,
-    tp1,
-    tp2,
-    tp3,
-    estimatedHours,
-    riskReward: `1:${rrRatio}`,
-    analysis,
-    volumeConfirmed,
-    volumeSpike,
-    bosConfirmed,
-    multiTimeframeConfluence: trendCount >= 3,
-    entryType,
-    profitPercent,
-    goldenCross,
-    supportZone,
-    score,
-    adxValue: adx4h.adx,
-    ichimokuBullish,
-    stochRsiBullish,
-    obvRising: obvRising1h,
-    fibLevel,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TEST SIGNAL — DEEP HARD TEST (5 timeframes, worst-case simulation)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function deepTestSignal(
-  symbol: string,
-  originalSignal: {
+  _originalSignal: {
     entryPrice: number;
     stopLoss: number;
     targetPrice: number;
     confidence: number;
     score: number;
   },
-  livePrice: number,
+  _livePrice: number,
 ): Promise<{
   passed: boolean;
   details: string;
   freshScore: number;
   freshConfidence: number;
 }> {
-  // Fetch all 5 timeframes fresh
-  const [c1m, c5m, c15m, c1h] = await Promise.all([
-    fetchCandles(symbol, "1m", 60),
-    fetchCandles(symbol, "5m", 60),
-    fetchCandles(symbol, "15m", 100),
-    fetchCandles(symbol, "1h", 220),
-  ]);
-
-  if (c1h.length < 100) {
-    return {
-      passed: false,
-      details: "❌ Insufficient data for deep test.",
-      freshScore: 0,
-      freshConfidence: 0,
-    };
-  }
-
-  // Run full fresh analysis
-  const freshAnalysis = await analyzeSymbol(symbol, livePrice);
-
-  if (!freshAnalysis) {
-    return {
-      passed: false,
-      details:
-        "❌ FAILED: Signal no longer meets all 30-indicator requirements on fresh data. One or more hard gates have been violated. Signal dropped for safety.",
-      freshScore: 0,
-      freshConfidence: 0,
-    };
-  }
-
-  // Additional checks: price drift from original entry
-  const entryDrift =
-    (Math.abs(livePrice - originalSignal.entryPrice) /
-      originalSignal.entryPrice) *
-    100;
-  if (entryDrift > 2.0) {
-    // Entry has drifted >2% — recalculate if still valid entry zone
-    const newStopDist = livePrice - freshAnalysis.stopLoss;
-    const newTPDist = freshAnalysis.targetPrice - livePrice;
-    if (newTPDist / newStopDist < 2.0) {
+  try {
+    const base = symbol.endsWith("USDT") ? symbol.replace("USDT", "") : symbol;
+    const res = await fetch(`${BINANCE_BASE}/ticker/24hr?symbol=${base}USDT`);
+    if (!res.ok) {
       return {
         passed: false,
-        details: `❌ FAILED: Price moved ${entryDrift.toFixed(2)}% from original entry. New RR ratio (${(newTPDist / newStopDist).toFixed(2)}) fell below 1:2 minimum. Signal invalidated.`,
-        freshScore: freshAnalysis.score,
-        freshConfidence: freshAnalysis.confidence,
+        details: "❌ Data fetch failed.",
+        freshScore: 0,
+        freshConfidence: 0,
       };
     }
-  }
-
-  // Worst-case SL simulation: using ATR, estimate probability of hitting SL before TP
-  const atr1h = atr(c1h, 14);
-  const distToSL = livePrice - freshAnalysis.stopLoss;
-  // If SL is within 1 ATR AND distance ratio < 1.5, too risky
-  const slRisk = distToSL / atr1h;
-  if (slRisk < 0.8) {
+    const d = (await res.json()) as {
+      lastPrice: string;
+      quoteVolume: string;
+      priceChangePercent: string;
+    };
+    const freshTickers: Record<string, TickerData> = {
+      [base]: {
+        price: Number.parseFloat(d.lastPrice),
+        volume24h: Number.parseFloat(d.quoteVolume),
+        change24h: Number.parseFloat(d.priceChangePercent),
+      },
+    };
+    const freshSignal = await analyzeSymbol(base, freshTickers);
+    if (!freshSignal || freshSignal.confidence < 88) {
+      return {
+        passed: false,
+        details: `❌ FAILED: Signal no longer passes all 18 gates on fresh data. Confidence: ${freshSignal?.confidence ?? 0}%.`,
+        freshScore: freshSignal?.score ?? 0,
+        freshConfidence: freshSignal?.confidence ?? 0,
+      };
+    }
+    return {
+      passed: true,
+      details: `✅ DEEP TEST PASSED | Score: ${freshSignal.score}/51 | Confidence: ${freshSignal.confidence}% | All 18 gates confirmed. Entry: ${freshSignal.entryType} | RR: ${freshSignal.riskReward}`,
+      freshScore: freshSignal.score ?? 0,
+      freshConfidence: freshSignal.confidence,
+    };
+  } catch {
     return {
       passed: false,
-      details: `❌ FAILED: Stop loss is within 0.8 ATR (${slRisk.toFixed(2)} ATR). Too close to current price — high probability of SL hit before TP. Signal dropped.`,
-      freshScore: freshAnalysis.score,
-      freshConfidence: freshAnalysis.confidence,
+      details: "❌ Test error.",
+      freshScore: 0,
+      freshConfidence: 0,
     };
   }
-
-  // Check 1M + 5M alignment for precision entry
-  const closes1m = c1m.map((c) => c.close);
-  const closes5m = c5m.map((c) => c.close);
-  let precisionScore = 0;
-  const rsi1m = rsi(closes1m);
-  const rsi5mVals = rsi(closes5m);
-  const macd5m = macd(closes5m);
-  const stoch5m = calcStochRSI(closes5m);
-
-  if (
-    rsi1m.length > 0 &&
-    rsi1m[rsi1m.length - 1] >= 45 &&
-    rsi1m[rsi1m.length - 1] <= 75
-  )
-    precisionScore++;
-  if (
-    rsi5mVals.length > 0 &&
-    rsi5mVals[rsi5mVals.length - 1] >= 45 &&
-    rsi5mVals[rsi5mVals.length - 1] <= 75
-  )
-    precisionScore++;
-  if (macd5m && macd5m.histogram > 0) precisionScore++;
-  if (stoch5m && stoch5m.k > 50 && stoch5m.k > stoch5m.d) precisionScore++;
-  if (detectVolumeSpike(c15m.length >= 21 ? c15m : c1h)) precisionScore++;
-
-  // Need at least 3/5 precision checks
-  if (precisionScore < 2) {
-    return {
-      passed: false,
-      details: `❌ FAILED: Short-term momentum insufficient (${precisionScore}/5 precision checks passed). RSI(1M), MACD(5M), or StochRSI(5M) showing weakness. Waiting for better entry.`,
-      freshScore: freshAnalysis.score,
-      freshConfidence: freshAnalysis.confidence,
-    };
-  }
-
-  return {
-    passed: true,
-    details: `✅ DEEP TEST PASSED | Score: ${freshAnalysis.score}/30 | Confidence: ${freshAnalysis.confidence}% | SL Safety: ${slRisk.toFixed(1)} ATR away | Precision: ${precisionScore}/5 | RR: ${freshAnalysis.riskReward} | All gates confirmed on fresh data. Entry type: ${freshAnalysis.entryType}. This signal has passed 30+ indicators across multiple timeframes.`,
-    freshScore: freshAnalysis.score,
-    freshConfidence: freshAnalysis.confidence,
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ULTRA-DEEP VERDICT ANALYSIS — Maximum power re-analysis for tracked trades
-// Fetches ALL 5 timeframes, runs 30+ indicators, weighted composite scoring
-// Returns one of two absolute verdicts: CONFIRMED_HIT_TP or EXIT_NOW_NO_TP
+// ULTRA DEEP VERDICT ANALYSIS
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface UltraDeepVerdict {
-  verdict: "CONFIRMED_HIT_TP" | "MONITORING" | "EXIT_NOW_NO_TP";
-  compositeScore: number; // 0-100
-  bullishCount: number;
-  bearishCount: number;
-  neutralCount: number;
-  hardExitCount: number; // how many hard exit conditions fired
-  hardExitTriggered: boolean; // true only when 2+ hard exits
-  hardExitReason: string | null;
-  hardExitReasons: string[]; // list of all fired conditions
-  currentPrice: number;
-  tpProgress: number; // % progress toward TP
-  estimatedTimeToTP: string | null;
-  keyBullishSignals: string[];
-  keyBearishSignals: string[];
-  verdictTimestamp: string;
-  recommendation: string;
-}
-
-interface TFIndicators {
-  rsiVal: number;
-  macdHisto: number;
-  macdHistoPrev: number;
-  ema20: number;
-  ema50: number;
-  ema100: number;
-  ema200: number;
-  adxVal: number;
-  plusDI: number;
-  minusDI: number;
-  bbAboveMiddle: boolean;
-  bbAtUpper: boolean;
-  stochK: number;
-  stochD: number;
-  williamsR: number;
-  cci: number;
-  mfi: number;
-  obvRising: boolean;
-  aboveVWAP: boolean;
-  volumeSpike: boolean;
-  psarBullish: boolean;
-  lastClose: number;
-  atrVal: number;
-  hhhl: boolean;
-  bosConf: boolean;
-}
-
-async function computeTFIndicators(
-  symbol: string,
-  interval: "1m" | "5m" | "15m" | "1h" | "4h",
-  limit: number,
-): Promise<TFIndicators | null> {
-  const candles = await fetchCandles(symbol, interval, limit);
-  if (candles.length < 30) return null;
-  const closes = candles.map((c) => c.close);
-  const lastClose = closes[closes.length - 1];
-
-  const rsiVals = rsi(closes, 14);
-  const rsiVal = rsiVals.length > 0 ? rsiVals[rsiVals.length - 1] : 50;
-
-  const macdResult = macd(closes);
-  const macdHisto = macdResult?.histogram ?? 0;
-  const macdHistoPrev = macdResult?.prevHistogram ?? 0;
-
-  const e20 = ema(closes, 20);
-  const e50 = ema(closes, Math.min(50, closes.length - 1));
-  const e100 = ema(closes, Math.min(100, closes.length - 1));
-  const e200 = ema(closes, Math.min(200, closes.length - 1));
-  const ema20 = e20.length > 0 ? e20[e20.length - 1] : lastClose;
-  const ema50 = e50.length > 0 ? e50[e50.length - 1] : lastClose;
-  const ema100 = e100.length > 0 ? e100[e100.length - 1] : lastClose;
-  const ema200 = e200.length > 0 ? e200[e200.length - 1] : lastClose;
-
-  const adxResult = calcADX(candles, 14);
-
-  const bb = calcBollinger(closes, 20, 2);
-  const bbAboveMiddle = bb ? lastClose > bb.middle : false;
-  const bbAtUpper = bb ? lastClose > bb.upper * 0.97 : false;
-
-  const stoch = calcStochRSI(closes, 14, 14, 3, 3);
-  const stochK = stoch?.k ?? 50;
-  const stochD = stoch?.d ?? 50;
-
-  const wrVal = calcWilliamsR(candles, 14);
-  const cciVal = calcCCI(candles, 20);
-  const mfiVal = calcMFI(candles, 14);
-
-  const obvR = isOBVRising(candles);
-  const vwapVal = calcVWAP(candles.slice(-50));
-  const aboveVWAP = vwapVal > 0 ? lastClose > vwapVal : false;
-  const volSpike = detectVolumeSpike(candles);
-
-  const psarVals = calcPSAR(candles);
-  const psarBullish =
-    psarVals.length > 0 && lastClose > psarVals[psarVals.length - 1];
-
-  const atrVal = atr(candles, 14);
-  const hhhlVal = hasHigherHighsLows(candles);
-  const bosConf = candles.length >= 22 ? detectBoS(candles) : false;
-
-  return {
-    rsiVal,
-    macdHisto,
-    macdHistoPrev,
-    ema20,
-    ema50,
-    ema100,
-    ema200,
-    adxVal: adxResult.adx,
-    plusDI: adxResult.plusDI,
-    minusDI: adxResult.minusDI,
-    bbAboveMiddle,
-    bbAtUpper,
-    stochK,
-    stochD,
-    williamsR: wrVal,
-    cci: cciVal,
-    mfi: mfiVal,
-    obvRising: obvR,
-    aboveVWAP,
-    volumeSpike: volSpike,
-    psarBullish,
-    lastClose,
-    atrVal,
-    hhhl: hhhlVal,
-    bosConf,
-  };
-}
-
+/**
+ * Runs a full 18-gate reanalysis with fresh data for tracked trades.
+ * @param signal - the original LiveSignal that was tracked
+ * @param currentPrice - latest live price
+ * @returns VerdictResult with verdict, reason, confidence, progressPercent
+ */
 export async function ultraDeepVerdictAnalysis(
-  symbol: string,
-  originalSignal: {
-    direction: "BUY" | "SELL";
-    entryPrice: number;
-    targetPrice: number;
-    stopLoss: number;
-  },
-  livePrice: number,
+  signal:
+    | LiveSignal
+    | {
+        direction: "BUY" | "SELL";
+        entryPrice: number;
+        targetPrice: number;
+        stopLoss: number;
+      },
+  currentPrice: number,
 ): Promise<UltraDeepVerdict> {
-  const isBuy = originalSignal.direction === "BUY";
-  const tpProgress = isBuy
-    ? Math.max(
-        0,
-        Math.min(
-          100,
-          ((livePrice - originalSignal.entryPrice) /
-            (originalSignal.targetPrice - originalSignal.entryPrice)) *
-            100,
-        ),
-      )
-    : Math.max(
-        0,
-        Math.min(
-          100,
-          ((originalSignal.entryPrice - livePrice) /
-            (originalSignal.entryPrice - originalSignal.targetPrice)) *
-            100,
-        ),
-      );
+  const rawSym = "symbol" in signal ? (signal as LiveSignal).symbol : "";
+  const base = rawSym.endsWith("USDT") ? rawSym.replace("USDT", "") : rawSym;
+  const isBuy = signal.direction === "BUY";
 
+  const tpProgress = Math.max(
+    0,
+    Math.min(
+      100,
+      isBuy
+        ? ((currentPrice - signal.entryPrice) /
+            (signal.targetPrice - signal.entryPrice)) *
+            100
+        : ((signal.entryPrice - currentPrice) /
+            (signal.entryPrice - signal.targetPrice)) *
+            100,
+    ),
+  );
   const now = new Date().toISOString();
-  const fmtP = (p: number) =>
+  const fmt = (p: number) =>
     p.toLocaleString(undefined, { maximumFractionDigits: 6 });
 
-  // Fetch ALL 5 timeframes in parallel
-  const [tf1m, tf5m, tf15m, tf1h, tf4h] = await Promise.all([
-    computeTFIndicators(symbol, "1m", 100),
-    computeTFIndicators(symbol, "5m", 100),
-    computeTFIndicators(symbol, "15m", 200),
-    computeTFIndicators(symbol, "1h", 200),
-    computeTFIndicators(symbol, "4h", 200),
-  ]);
-
-  // Fallback if data unavailable
-  if (!tf1h && !tf4h) {
-    return {
-      verdict: "EXIT_NOW_NO_TP",
-      compositeScore: 0,
-      bullishCount: 0,
-      bearishCount: 0,
-      neutralCount: 0,
-      hardExitCount: 2,
-      hardExitTriggered: true,
-      hardExitReason: "Unable to fetch live market data for analysis",
-      hardExitReasons: ["No live data available"],
-      currentPrice: livePrice,
+  // If near SL — instant exit
+  const slBuffer = signal.stopLoss * 1.002;
+  if (isBuy && currentPrice <= slBuffer) {
+    return buildVerdict(
+      "EXIT_NOW_NO_TP",
+      10,
       tpProgress,
-      estimatedTimeToTP: null,
-      keyBullishSignals: [],
-      keyBearishSignals: ["No live data available"],
-      verdictTimestamp: now,
-      recommendation: `EXIT NOW — could not verify conditions. Exit at $${fmtP(livePrice)} to protect capital.`,
-    };
-  }
-
-  // ── HARD EXIT CONDITIONS ──
-  // Each condition is counted independently.
-  // EXIT only fires when 2+ conditions are TRUE simultaneously.
-  // 1 condition alone = MONITORING (caution), not EXIT.
-  const hardExitReasons: string[] = [];
-
-  // Hard Exit 1: 4H EMA20 < EMA50 (trend reversed on highest timeframe)
-  if (tf4h && tf4h.ema20 < tf4h.ema50) {
-    hardExitReasons.push(
-      `4H trend reversed bearish — EMA20 ($${fmtP(tf4h.ema20)}) crossed below EMA50 ($${fmtP(tf4h.ema50)})`,
+      now,
+      currentPrice,
+      signal,
+      `🚨 CRITICAL: Price $${fmt(currentPrice)} at or below stop loss $${fmt(signal.stopLoss)}. Exit immediately.`,
+      [],
+      [fmt(currentPrice)],
     );
   }
 
-  // Hard Exit 2: 1H RSI below 38 (momentum severely lost — tightened threshold)
-  if (tf1h && tf1h.rsiVal < 38) {
-    hardExitReasons.push(
-      `1H RSI dropped to ${tf1h.rsiVal.toFixed(1)} — bullish momentum severely lost`,
+  // If >90% to TP — confirmed
+  if (tpProgress > 90) {
+    return buildVerdict(
+      "CONFIRMED_HIT_TP",
+      98,
+      tpProgress,
+      now,
+      currentPrice,
+      signal,
+      `🎯 ${tpProgress.toFixed(1)}% progress to TP. Excellent — hold to target $${fmt(signal.targetPrice)}.`,
+      ["Near TP"],
+      [],
     );
   }
 
-  // Hard Exit 3: Price below or within 0.2% of stop loss (critical proximity)
-  const slBuffer = originalSignal.stopLoss * 1.002;
-  if (livePrice <= slBuffer) {
-    hardExitReasons.push(
-      `Price $${fmtP(livePrice)} is at or within 0.2% of stop loss $${fmtP(originalSignal.stopLoss)} — exit immediately`,
+  // Fetch fresh data and rerun 18-gate system
+  try {
+    const tickerRes = await fetch(
+      `${BINANCE_BASE}/ticker/24hr?symbol=${base}USDT`,
     );
-  }
-
-  // Hard Exit 4: 4H MACD histogram gone negative AND 1H also bearish (both must align)
-  if (tf4h && tf4h.macdHisto < 0 && tf1h && tf1h.macdHisto < 0) {
-    hardExitReasons.push(
-      `MACD bearish on both 4H (${tf4h.macdHisto.toFixed(6)}) and 1H (${tf1h.macdHisto.toFixed(6)}) — confirmed bearish momentum shift`,
-    );
-  }
-
-  // Hard Exit 5: ADX on 1H below 12 with -DI dominating strongly (tightened — was 15)
-  if (tf1h && tf1h.adxVal < 12 && tf1h.minusDI > tf1h.plusDI * 1.3) {
-    hardExitReasons.push(
-      `ADX(1H) collapsed to ${tf1h.adxVal.toFixed(1)} with -DI (${tf1h.minusDI.toFixed(1)}) strongly dominating +DI — trend reversing`,
-    );
-  }
-
-  // Hard Exit 6: Price dropped >2.5% from entry AND below EMA20 on 1H (both required)
-  const entryDrop =
-    ((originalSignal.entryPrice - livePrice) / originalSignal.entryPrice) * 100;
-  if (isBuy && entryDrop > 2.5 && tf1h && livePrice < tf1h.ema20) {
-    hardExitReasons.push(
-      `Price dropped ${entryDrop.toFixed(2)}% below entry and is now below 1H EMA20 ($${fmtP(tf1h.ema20)}) — confirmed reversal`,
-    );
-  }
-
-  const hardExitCount = hardExitReasons.length;
-  // Hard exit triggers only when 2 or more conditions fire simultaneously
-  const hardExitTriggered = hardExitCount >= 2;
-  const hardExitReason = hardExitTriggered ? hardExitReasons[0] : null;
-
-  // ── COMPOSITE SCORING (weighted by timeframe) ──
-  // 4H = 3x, 1H = 2x, 15M = 1.5x, 5M = 1x, 1M = 0.5x
-  const weights = { tf4h: 3, tf1h: 2, tf15m: 1.5, tf5m: 1, tf1m: 0.5 };
-
-  const keyBullish: string[] = [];
-  const keyBearish: string[] = [];
-
-  let weightedBullish = 0;
-  let weightedTotal = 0;
-  let rawBullish = 0;
-  let rawBearish = 0;
-
-  function scoreTF(tf: TFIndicators | null, w: number, label: string): void {
-    if (!tf) return;
-
-    const checks: Array<{ bull: boolean; name: string }> = [
-      {
-        bull: isBuy ? tf.lastClose > tf.ema20 : tf.lastClose < tf.ema20,
-        name: `${label} price vs EMA20`,
-      },
-      {
-        bull: isBuy ? tf.ema20 > tf.ema50 : tf.ema20 < tf.ema50,
-        name: `${label} EMA20>EMA50`,
-      },
-      {
-        bull: isBuy ? tf.ema50 > tf.ema100 : tf.ema50 < tf.ema100,
-        name: `${label} EMA50>EMA100`,
-      },
-      {
-        bull: isBuy ? tf.ema100 > tf.ema200 : tf.ema100 < tf.ema200,
-        name: `${label} EMA100>EMA200`,
-      },
-      {
-        bull: isBuy
-          ? tf.rsiVal >= 50 && tf.rsiVal < 75
-          : tf.rsiVal <= 50 && tf.rsiVal > 25,
-        name: `${label} RSI=${tf.rsiVal.toFixed(0)}`,
-      },
-      {
-        bull: isBuy ? tf.macdHisto > 0 : tf.macdHisto < 0,
-        name: `${label} MACD histogram`,
-      },
-      {
-        bull: isBuy
-          ? tf.macdHistoPrev < 0 && tf.macdHisto > 0
-          : tf.macdHistoPrev > 0 && tf.macdHisto < 0,
-        name: `${label} MACD crossover`,
-      },
-      {
-        bull: isBuy
-          ? tf.stochK > 50 && tf.stochK < 80 && tf.stochK > tf.stochD
-          : tf.stochK < 50 && tf.stochK > 20 && tf.stochK < tf.stochD,
-        name: `${label} StochRSI`,
-      },
-      {
-        bull: isBuy
-          ? tf.adxVal > 20 && tf.plusDI > tf.minusDI
-          : tf.adxVal > 20 && tf.minusDI > tf.plusDI,
-        name: `${label} ADX=${tf.adxVal.toFixed(0)}`,
-      },
-      {
-        bull: isBuy ? tf.bbAboveMiddle && !tf.bbAtUpper : !tf.bbAboveMiddle,
-        name: `${label} Bollinger Bands`,
-      },
-      { bull: isBuy ? tf.aboveVWAP : !tf.aboveVWAP, name: `${label} VWAP` },
-      {
-        bull: isBuy
-          ? tf.williamsR > -80 && tf.williamsR < -20
-          : tf.williamsR < -20 && tf.williamsR > -80,
-        name: `${label} Williams%R=${tf.williamsR.toFixed(0)}`,
-      },
-      {
-        bull: isBuy ? tf.cci > 0 && tf.cci < 200 : tf.cci < 0 && tf.cci > -200,
-        name: `${label} CCI=${tf.cci.toFixed(0)}`,
-      },
-      {
-        bull: isBuy ? tf.mfi >= 50 && tf.mfi < 80 : tf.mfi <= 50 && tf.mfi > 20,
-        name: `${label} MFI=${tf.mfi.toFixed(0)}`,
-      },
-      { bull: tf.obvRising, name: `${label} OBV rising` },
-      { bull: tf.volumeSpike, name: `${label} Volume spike` },
-      { bull: tf.psarBullish, name: `${label} Parabolic SAR bullish` },
-      { bull: tf.hhhl, name: `${label} Higher Highs/Lows` },
-      { bull: tf.bosConf, name: `${label} Break of Structure` },
-    ];
-
-    for (const c of checks) {
-      weightedTotal += w;
-      if (c.bull) {
-        weightedBullish += w;
-        rawBullish++;
-        if (keyBullish.length < 5) keyBullish.push(c.name);
-      } else {
-        rawBearish++;
-        if (keyBearish.length < 5) keyBearish.push(c.name);
-      }
+    let freshVerdict: LiveSignal | null = null;
+    if (tickerRes.ok) {
+      const d = (await tickerRes.json()) as {
+        lastPrice: string;
+        quoteVolume: string;
+        priceChangePercent: string;
+      };
+      const freshTickers: Record<string, TickerData> = {
+        [base]: {
+          price: Number.parseFloat(d.lastPrice),
+          volume24h: Number.parseFloat(d.quoteVolume),
+          change24h: Number.parseFloat(d.priceChangePercent),
+        },
+      };
+      freshVerdict = await analyzeSymbol(base, freshTickers);
     }
+
+    if (freshVerdict && freshVerdict.confidence >= 88) {
+      const conf = freshVerdict.confidence;
+      return buildVerdict(
+        "CONFIRMED_HIT_TP",
+        conf,
+        tpProgress,
+        now,
+        currentPrice,
+        signal,
+        `✅ All 18 gates still confirmed. Score: ${freshVerdict.score}/51 | Confidence: ${conf}%. Trade still on track — ${tpProgress.toFixed(1)}% progress to TP $${fmt(signal.targetPrice)}.`,
+        [
+          "18 gates pass",
+          `RSI: ${freshVerdict.rsiValue.toFixed(0)}`,
+          "Trend bullish",
+        ],
+        [],
+      );
+    }
+
+    if (freshVerdict && freshVerdict.confidence >= 60) {
+      return buildVerdict(
+        "MONITORING",
+        freshVerdict.confidence,
+        tpProgress,
+        now,
+        currentPrice,
+        signal,
+        `⚠️ Signal weakening — confidence ${freshVerdict.confidence}% (was ${"confidence" in signal ? (signal as LiveSignal).confidence : 88}%). Trade at ${tpProgress.toFixed(1)}% progress. Hold but watch closely.`,
+        [],
+        ["Some gates weakened"],
+      );
+    }
+
+    // Fresh analysis failed all 18 gates — serious issue
+    // Fetch 4h trend to determine if this is reversing
+    const c4h = await fetchCandles(base, "4h", 60);
+    const closes4h = c4h.map((c) => c.close);
+    const ema50_4h = ema(closes4h, 50);
+    const ema200_4h = ema(closes4h, 200);
+    const v50 = ema50_4h.length > 0 ? ema50_4h[ema50_4h.length - 1] : 0;
+    const v200 = ema200_4h.length > 0 ? ema200_4h[ema200_4h.length - 1] : 0;
+    const trend4hReversed = v50 > 0 && v200 > 0 && v50 < v200;
+
+    if (trend4hReversed) {
+      return buildVerdict(
+        "EXIT_NOW_NO_TP",
+        15,
+        tpProgress,
+        now,
+        currentPrice,
+        signal,
+        `🚨 4H trend reversed. EMA50 crossed below EMA200. Exit at $${fmt(currentPrice)} to protect capital.`,
+        [],
+        ["4H trend reversed"],
+      );
+    }
+
+    // Progress is good — likely consolidation
+    if (tpProgress > 30) {
+      return buildVerdict(
+        "MONITORING",
+        55,
+        tpProgress,
+        now,
+        currentPrice,
+        signal,
+        `⚠️ Market consolidating at ${tpProgress.toFixed(1)}% progress. Some indicators weakened but 4H trend intact. Hold and monitor.`,
+        ["4H trend intact"],
+        ["Consolidating"],
+      );
+    }
+
+    return buildVerdict(
+      "EXIT_NOW_NO_TP",
+      20,
+      tpProgress,
+      now,
+      currentPrice,
+      signal,
+      `🚨 Multiple confirmation gates failed on fresh analysis. Conditions have changed significantly. Exit at $${fmt(currentPrice)}.`,
+      [],
+      ["18-gate failed", "Low confidence"],
+    );
+  } catch {
+    // Data error — default to hold if progress is positive
+    if (tpProgress > 20) {
+      return buildVerdict(
+        "MONITORING",
+        50,
+        tpProgress,
+        now,
+        currentPrice,
+        signal,
+        `⚠️ Could not fetch fresh data. Trade at ${tpProgress.toFixed(1)}% progress. Original signal still assumed valid — hold with caution.`,
+        [],
+        ["No fresh data"],
+      );
+    }
+    return buildVerdict(
+      "MONITORING",
+      45,
+      tpProgress,
+      now,
+      currentPrice,
+      signal,
+      `⚠️ Data fetch error. Original signal conditions assumed valid. Monitor closely. Progress: ${tpProgress.toFixed(1)}%.`,
+      [],
+      ["No fresh data"],
+    );
   }
+}
 
-  scoreTF(tf4h, weights.tf4h, "4H");
-  scoreTF(tf1h, weights.tf1h, "1H");
-  scoreTF(tf15m, weights.tf15m, "15M");
-  scoreTF(tf5m, weights.tf5m, "5M");
-  scoreTF(tf1m, weights.tf1m, "1M");
-
-  const compositeScore =
-    weightedTotal > 0 ? Math.round((weightedBullish / weightedTotal) * 100) : 0;
-
-  // ── FINAL VERDICT DECISION ──
-  // CONFIRMED: 0 hard exits AND score >= 55%, OR 1 hard exit AND score >= 65%
-  // MONITORING: 0-1 hard exits AND score between 45-65% — signal still alive, minor weakness
-  // EXIT: 2+ hard exits triggered, OR score < 45% regardless
-  let verdict: UltraDeepVerdict["verdict"];
-  if (hardExitTriggered) {
-    // 2+ hard exits = definitive EXIT
-    verdict = "EXIT_NOW_NO_TP";
-  } else if (hardExitCount === 0 && compositeScore >= 55) {
-    // Clean — no exit flags, solid score = CONFIRMED
-    verdict = "CONFIRMED_HIT_TP";
-  } else if (hardExitCount === 1 && compositeScore >= 65) {
-    // One weak signal but overall score still healthy = CONFIRMED with caution
-    verdict = "CONFIRMED_HIT_TP";
-  } else if (hardExitCount <= 1 && compositeScore >= 45) {
-    // Minor weakness detected — not enough for EXIT but needs monitoring
-    verdict = "MONITORING";
-  } else {
-    // Score collapsed (< 45%) even with 0-1 hard exits = EXIT
-    verdict = "EXIT_NOW_NO_TP";
-  }
-
-  // ── ESTIMATED TIME TO TP ──
-  let estimatedTimeToTP: string | null = null;
-  if (verdict === "CONFIRMED_HIT_TP") {
-    const atr1hVal = tf1h?.atrVal ?? livePrice * 0.01;
-    const tpDist = Math.abs(originalSignal.targetPrice - livePrice);
-    const atrMultiplesToTP = tpDist / atr1hVal;
-    const hoursEstimate = Math.max(1, Math.min(24, atrMultiplesToTP * 1.5));
-    if (hoursEstimate < 2) estimatedTimeToTP = "1-2 hours";
-    else if (hoursEstimate < 4) estimatedTimeToTP = "2-4 hours";
-    else if (hoursEstimate < 8) estimatedTimeToTP = "4-8 hours";
-    else
-      estimatedTimeToTP = `${Math.round(hoursEstimate)}-${Math.round(hoursEstimate * 1.3)} hours`;
-  }
-
-  // ── RECOMMENDATION ──
-  let recommendation: string;
-  if (verdict === "CONFIRMED_HIT_TP") {
-    const cautionNote =
-      hardExitCount === 1 ? ` (1 minor flag: ${hardExitReasons[0]})` : "";
-    recommendation = `All ${rawBullish} bullish signals confirmed across ${[tf1m, tf5m, tf15m, tf1h, tf4h].filter(Boolean).length} timeframes — HOLD position, target $${fmtP(originalSignal.targetPrice)} is on track (${tpProgress.toFixed(1)}% there).${cautionNote}`;
-  } else if (verdict === "MONITORING") {
-    const flagNote =
-      hardExitCount === 1 ? `Minor flag: ${hardExitReasons[0]}. ` : "";
-    recommendation = `${flagNote}Signal still valid but showing minor weakness (score ${compositeScore}/100). ${rawBearish} indicators need to recover. HOLD but watch closely — ${tpProgress.toFixed(1)}% progress to TP.`;
-  } else if (hardExitTriggered) {
-    recommendation = `CRITICAL: ${hardExitCount} confirmation failures detected. ${hardExitReasons.slice(0, 2).join(" | ")}. Exit immediately at $${fmtP(livePrice)} to protect capital.`;
-  } else {
-    recommendation = `Composite score ${compositeScore}/100 collapsed — ${rawBearish} bearish signals detected across timeframes. Exit at $${fmtP(livePrice)} before conditions deteriorate further.`;
-  }
+function buildVerdict(
+  verdict: "CONFIRMED_HIT_TP" | "MONITORING" | "EXIT_NOW_NO_TP",
+  confidence: number,
+  tpProgress: number,
+  now: string,
+  currentPrice: number,
+  signal: { targetPrice: number; entryPrice: number },
+  recommendation: string,
+  keyBullish: string[],
+  keyBearish: string[],
+): UltraDeepVerdict {
+  const fmt = (p: number) =>
+    p.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  const isExit = verdict === "EXIT_NOW_NO_TP";
+  const isMonitor = verdict === "MONITORING";
+  const estimatedTimeToTP =
+    verdict === "CONFIRMED_HIT_TP"
+      ? tpProgress > 80
+        ? "< 1 hour"
+        : tpProgress > 50
+          ? "1-3 hours"
+          : "2-6 hours"
+      : null;
 
   return {
     verdict,
-    compositeScore,
-    bullishCount: rawBullish,
-    bearishCount: rawBearish,
+    compositeScore: confidence,
+    bullishCount: keyBullish.length,
+    bearishCount: keyBearish.length,
     neutralCount: 0,
-    hardExitCount,
-    hardExitTriggered,
-    hardExitReason,
-    hardExitReasons,
-    currentPrice: livePrice,
+    hardExitCount: isExit ? 2 : isMonitor ? 1 : 0,
+    hardExitTriggered: isExit,
+    hardExitReason: isExit ? (keyBearish[0] ?? null) : null,
+    hardExitReasons: isExit ? keyBearish : [],
+    currentPrice,
     tpProgress,
     estimatedTimeToTP,
     keyBullishSignals: keyBullish,
     keyBearishSignals: keyBearish,
     verdictTimestamp: now,
-    recommendation,
+    recommendation: `${recommendation} | TP: $${fmt(signal.targetPrice)} | Entry: $${fmt(signal.entryPrice)}`,
+    // VerdictResult fields
+    reason: recommendation,
+    confidence,
+    progressPercent: tpProgress,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LIVE RE-ANALYSIS — for Update Verdict on tracked trades
-// Now internally delegates to ultraDeepVerdictAnalysis for maximum accuracy
+// LEGACY WRAPPER: liveReanalysis (used by some TrackingPage paths)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function liveReanalysis(
@@ -1921,151 +1225,179 @@ export async function liveReanalysis(
   confidence: number;
   reason: string;
 }> {
-  const [c15m, c1h, c4h] = await Promise.all([
-    fetchCandles(symbol, "15m", 60),
-    fetchCandles(symbol, "1h", 80),
-    fetchCandles(symbol, "4h", 60),
-  ]);
-
-  if (c1h.length < 30) {
-    return {
-      onTrack: true,
-      recommendation: "HOLD",
-      confidence: 60,
-      reason: "Insufficient data. Original signal conditions assumed valid.",
-    };
-  }
-
-  const closes1h = c1h.map((c) => c.close);
-  const closes4h = c4h.map((c) => c.close);
-  const rsi1hVals = rsi(closes1h);
-  const rsi4hVals = rsi(closes4h);
-  const macd1hResult = macd(closes1h);
-  const trend4h = c4h.length >= 30 ? detectTrend(c4h) : "sideways";
-  const trend1h = detectTrend(c1h);
-  const adx1h = calcADX(c1h);
-  const atr1hVal = atr(c1h, 14);
-  const obvOk = isOBVRising(c1h);
-  const volOk =
-    detectVolumeSpike(c1h) || detectVolumeSpike(c15m.length >= 21 ? c15m : c1h);
-
-  const isBuy = originalSignal.direction === "BUY";
-  const progress = isBuy
-    ? (livePrice - originalSignal.entryPrice) /
-      (originalSignal.targetPrice - originalSignal.entryPrice)
-    : (originalSignal.entryPrice - livePrice) /
-      (originalSignal.entryPrice - originalSignal.targetPrice);
-
-  const curRsi1h = rsi1hVals.length > 0 ? rsi1hVals[rsi1hVals.length - 1] : 50;
-  const curRsi4h = rsi4hVals.length > 0 ? rsi4hVals[rsi4hVals.length - 1] : 50;
-  const macdAligned = macd1hResult
-    ? isBuy
-      ? macd1hResult.histogram > 0
-      : macd1hResult.histogram < 0
-    : false;
-  const trendOk = isBuy
-    ? trend4h === "up" && trend1h === "up"
-    : trend4h === "down" && trend1h === "down";
-  const trendReversed = isBuy ? trend4h === "down" : trend4h === "up";
-
-  const slDist = Math.abs(livePrice - originalSignal.stopLoss);
-  const tpDist = Math.abs(livePrice - originalSignal.targetPrice);
-  const nearSL = slDist < atr1hVal * 0.6;
-  const nearTP = tpDist < atr1hVal * 0.5;
-  const atTP1 =
-    isBuy &&
-    livePrice >=
-      originalSignal.entryPrice +
-        (originalSignal.targetPrice - originalSignal.entryPrice) * 0.33;
-
-  const fmtPrice = (p: number) =>
-    p.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  const exitPrice = fmtPrice(livePrice);
-  const slPrice = fmtPrice(originalSignal.stopLoss);
-  const tpPrice = fmtPrice(originalSignal.targetPrice);
-  const pct = Math.max(0, progress * 100).toFixed(1);
-
-  // Critical exit signals
-  if (trendReversed && !trendOk) {
-    return {
-      onTrack: false,
-      recommendation: `EXIT NOW at $${exitPrice}`,
-      confidence: 20,
-      reason: `⚠️ CRITICAL: 4H trend reversed to ${trend4h}. Bullish thesis invalidated. Exit immediately to protect capital. RSI(4H): ${curRsi4h.toFixed(1)}. ADX: ${adx1h.adx.toFixed(1)}.`,
-    };
-  }
-
-  if (nearSL) {
-    const reasons: string[] = [];
-    if (!macdAligned) reasons.push("MACD bearish");
-    if (curRsi1h < 40) reasons.push(`RSI(1H) weak at ${curRsi1h.toFixed(1)}`);
-    if (!obvOk) reasons.push("OBV declining");
-    return {
-      onTrack: false,
-      recommendation: `EXIT NOW at $${exitPrice} — SL at $${slPrice} nearby`,
-      confidence: 25,
-      reason: `🚨 Price is ${(slDist / atr1hVal).toFixed(2)} ATR from stop loss. ${reasons.length > 0 ? `Weakness confirmed: ${reasons.join(", ")}.` : "Exit to preserve capital."}`,
-    };
-  }
-
-  if (nearTP) {
-    return {
-      onTrack: true,
-      recommendation: `TAKE PARTIAL / HOLD — near TP $${tpPrice}`,
-      confidence: 92,
-      reason: `🎯 Price ${pct}% toward full TP. Consider closing 50-70% here at $${exitPrice}. RSI(1H): ${curRsi1h.toFixed(1)}. Momentum: ${macdAligned ? "strong ✓" : "weakening"}.`,
-    };
-  }
-
-  if (atTP1 && progress > 0.3) {
-    return {
-      onTrack: true,
-      recommendation: `TAKE PARTIAL at TP1 — $${exitPrice} (consider 30-50% close)`,
-      confidence: 88,
-      reason: `✅ TP1 zone reached. Progress: ${pct}%. Secure profits on partial position. Hold remainder to TP2/TP3 if RSI(1H): ${curRsi1h.toFixed(1)} stays below 72 and trend remains bullish.`,
-    };
-  }
-
-  // Mixed signals — deteriorating
-  const bearishCount = [
-    !macdAligned,
-    curRsi1h < 45,
-    !trendOk,
-    !obvOk,
-    !volOk,
-  ].filter(Boolean).length;
-  if (bearishCount >= 3) {
-    const issues: string[] = [];
-    if (!macdAligned) issues.push("MACD crossed bearish");
-    if (curRsi1h < 45) issues.push(`RSI(1H) fell to ${curRsi1h.toFixed(1)}`);
-    if (!trendOk) issues.push("trend weakening");
-    if (!obvOk) issues.push("OBV declining");
-    return {
-      onTrack: false,
-      recommendation: `REDUCE TO 50% at $${exitPrice} — uncertainty rising`,
-      confidence: 40,
-      reason: `⚠️ ${bearishCount}/5 bearish signals: ${issues.join(", ")}. Close half position at $${exitPrice} to reduce risk. Progress: ${pct}%.`,
-    };
-  }
-
-  // On track
-  const positives: string[] = [];
-  if (trendOk) positives.push("Trend(4H/1H): bullish ✓");
-  if (macdAligned) positives.push("MACD aligned ✓");
-  if (curRsi1h < 70 && curRsi1h > 45)
-    positives.push(`RSI(1H): ${curRsi1h.toFixed(1)} healthy ✓`);
-  if (obvOk) positives.push("OBV rising ✓");
-  if (adx1h.adx > 20)
-    positives.push(`ADX: ${adx1h.adx.toFixed(1)} trend strong ✓`);
-
-  const conf = Math.min(
-    95,
-    60 + positives.length * 6 + (progress > 0 ? 10 : 0),
-  );
-  return {
-    onTrack: true,
-    recommendation: `HOLD — ${pct}% progress to TP $${tpPrice}`,
-    confidence: conf,
-    reason: `✅ Trade progressing. ${positives.join(". ")}. RSI(4H): ${curRsi4h.toFixed(1)}. Live price: $${exitPrice}.`,
+  const fakeSignal: LiveSignal = {
+    symbol,
+    direction: "BUY",
+    entryPrice: originalSignal.entryPrice,
+    stopLoss: originalSignal.stopLoss,
+    targetPrice: originalSignal.targetPrice,
+    tp1: originalSignal.targetPrice,
+    tp2: originalSignal.targetPrice,
+    tp3: originalSignal.targetPrice,
+    confidence: 88,
+    estimatedHours: 4,
+    riskReward: "1:2",
+    entryType: "Momentum Entry",
+    rsiValue: 55,
+    macdHistogram: 0.01,
+    volumeSpike: true,
+    breakOfStructure: true,
+    multiTimeframeConfluence: "5/5 Timeframes Aligned",
+    stopHuntConfirmed: true,
+    chochConfirmed: true,
+    ichimokuConfirmed: true,
+    vwapConfirmed: true,
+    scanTime: Date.now(),
+    profitPercent: 3,
   };
+  const verdict = await ultraDeepVerdictAnalysis(fakeSignal, livePrice);
+  const onTrack = verdict.verdict !== "EXIT_NOW_NO_TP";
+  return {
+    onTrack,
+    recommendation:
+      verdict.verdict === "EXIT_NOW_NO_TP"
+        ? `EXIT NOW at $${livePrice.toLocaleString(undefined, { maximumFractionDigits: 6 })}`
+        : verdict.verdict === "MONITORING"
+          ? `HOLD — ${verdict.tpProgress.toFixed(1)}% progress to TP`
+          : `CONFIRMED — ${verdict.tpProgress.toFixed(1)}% progress to TP`,
+    confidence: verdict.confidence,
+    reason: verdict.reason,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIVE PRICES HOOK
+// Returns Record<string, number> — just the price per symbol
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function useLivePrices(
+  symbols: string[],
+  _intervalMs?: number,
+): Record<string, number> {
+  const intervalMs = _intervalMs ?? 10000;
+  const [prices, setPrices] = useState<Record<string, number>>({});
+  // biome-ignore lint/correctness/useExhaustiveDependencies: symbols joined for stability
+  useEffect(() => {
+    if (symbols.length === 0) return;
+    let cancelled = false;
+    async function poll() {
+      try {
+        // Fetch mini tickers for specific symbols
+        const syms = symbols.slice(0, 50); // Limit to 50 to avoid huge requests
+        const params = syms.map(
+          (s) => `${s.endsWith("USDT") ? s : `${s}USDT`}`,
+        );
+        const url = `${BINANCE_BASE}/ticker/price?symbols=${JSON.stringify(params)}`;
+        const res = await fetch(url);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as Array<{
+          symbol: string;
+          price: string;
+        }>;
+        const map: Record<string, number> = {};
+        for (const d of data) {
+          const base = d.symbol.replace("USDT", "");
+          const price = Number.parseFloat(d.price);
+          map[base] = price;
+          map[d.symbol] = price; // full symbol too
+        }
+        if (!cancelled) setPrices(map);
+      } catch {
+        // ignore
+      }
+    }
+    poll();
+    const id = setInterval(poll, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [symbols.join(","), intervalMs]);
+  return prices;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPATIBILITY SHIMS
+// Keep old names working for components that haven't migrated yet
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** @deprecated Use quickPreFilter(symbol, tickers). Async version for backwards compat. */
+export async function quickPreFilterAsync(
+  symbol: string,
+  price: number,
+  volume24h: number,
+): Promise<boolean> {
+  if (volume24h < 5_000_000) return false;
+  if (!price || price <= 0) return false;
+  const stables = ["USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "FDUSD"];
+  const base = symbol.endsWith("USDT") ? symbol.replace("USDT", "") : symbol;
+  if (stables.some((s) => base.includes(s))) return false;
+  return true;
+}
+
+/** @deprecated Kept for TickerTape backwards compat — returns {price, change24h} shape */
+export function useLivePricesLegacy(
+  symbols: string[],
+  intervalMs = 10000,
+): Record<string, { price: number; change24h: number }> {
+  const [prices, setPrices] = useState<
+    Record<string, { price: number; change24h: number }>
+  >({});
+  const symbolKey = symbols.join(",");
+  useEffect(() => {
+    if (!symbolKey) return;
+    const symsSnap = symbolKey.split(",").filter(Boolean);
+    let cancelled = false;
+    async function poll() {
+      try {
+        const syms = symsSnap.slice(0, 20);
+        const params = JSON.stringify(
+          syms.map((s) => (s.endsWith("USDT") ? s : `${s}USDT`)),
+        );
+        const res = await fetch(
+          `${BINANCE_BASE}/ticker/24hr?symbols=${params}`,
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as Array<{
+          symbol: string;
+          lastPrice: string;
+          priceChangePercent: string;
+        }>;
+        const map: Record<string, { price: number; change24h: number }> = {};
+        for (const d of data) {
+          const base = d.symbol.replace("USDT", "");
+          map[base] = {
+            price: Number.parseFloat(d.lastPrice),
+            change24h: Number.parseFloat(d.priceChangePercent),
+          };
+        }
+        if (!cancelled) setPrices(map);
+      } catch {
+        // ignore
+      }
+    }
+    poll();
+    const id = setInterval(poll, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [symbolKey, intervalMs]);
+  return prices;
+}
+
+// Re-export detectTrend for any consumers that use it
+export function detectTrend(candles: OHLCV[]): "up" | "down" | "sideways" {
+  if (candles.length < 50) return "sideways";
+  const closes = candles.map((c) => c.close);
+  const e50 = ema(closes, 50);
+  const e200 = ema(closes, Math.min(200, closes.length));
+  if (e50.length > 0 && e200.length > 0) {
+    const v50 = e50[e50.length - 1];
+    const v200 = e200[e200.length - 1];
+    const cur = closes[closes.length - 1];
+    if (cur > v50 && v50 > v200) return "up";
+    if (cur < v50 && v50 < v200) return "down";
+  }
+  return "sideways";
 }

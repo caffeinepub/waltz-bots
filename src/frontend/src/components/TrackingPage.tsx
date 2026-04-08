@@ -33,7 +33,6 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-// TrackedTradeRecord imported from useActor above
 
 // TrackedTrade extends LiveSignal with tracking-specific fields
 interface TrackedTrade extends LiveSignal {
@@ -70,7 +69,7 @@ interface UpdateResultData {
   details: string;
 }
 
-/** Compute AI verdict from live data vs signal targets */
+/** Fallback local verdict when deep analysis hasn't run */
 function computeVerdict(
   signal: LiveSignal,
   livePrice: number,
@@ -109,14 +108,14 @@ function computeVerdict(
 
   if (bearishFactors >= 3) {
     verdict = "UNLIKELY";
-    suggestion = `Price is approaching the stop loss zone at $${signal.stopLoss.toLocaleString(undefined, { maximumFractionDigits: 4 })}. RSI: ${rsi.toFixed(1)}, Trend: ${signal.trend}. Consider reviewing position. This assessment is based on live Binance data.`;
+    suggestion = `Price is approaching the stop loss zone at $${signal.stopLoss.toLocaleString(undefined, { maximumFractionDigits: 4 })}. RSI: ${rsi.toFixed(1)}, Trend: ${signal.trend}. Consider reviewing position.`;
   } else if (bullishFactors >= 4) {
     verdict = "LIKELY";
     const pct = Math.max(0, progress * 100);
     suggestion = `Strong ${isBuy ? "bullish" : "bearish"} conditions persist. Progress to TP: ${pct.toFixed(1)}%. RSI: ${rsi.toFixed(1)}, MACD: ${macdPositive ? "bullish" : "bearish"}, Trend: ${signal.trend}. Multi-TF confluence: ${signal.multiTimeframeConfluence ? "YES" : "partial"}. High probability of hitting $${signal.targetPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}.`;
   } else {
     verdict = "UNCERTAIN";
-    suggestion = `Mixed signals: RSI ${rsi.toFixed(1)}, MACD ${macdPositive ? "positive" : "negative"}, trend ${signal.trend}. Trade is valid but monitor closely. Progress: ${Math.max(0, progress * 100).toFixed(1)}% toward TP. Live Binance data is being tracked.`;
+    suggestion = `Mixed signals: RSI ${rsi.toFixed(1)}, MACD ${macdPositive ? "positive" : "negative"}, trend ${signal.trend}. Trade is valid but monitor closely. Progress: ${Math.max(0, progress * 100).toFixed(1)}% toward TP.`;
   }
 
   return { verdict, suggestion };
@@ -136,10 +135,346 @@ function getVerdictIcon(v: TrackedTrade["aiVerdict"]) {
 
 const AI_CHAT_RESPONSES: string[] = [
   "Based on live Binance OHLCV data, this trade is progressing as the signal engine projected. Continue monitoring price action at key support/resistance levels.",
-  "The real-time RSI and MACD indicators are computed from actual candle data. The signal engine analyzed 3 timeframes (5m, 15m, 1h) before generating this trade.",
+  "The real-time RSI and MACD indicators are computed from actual candle data. The signal engine analyzed 5 timeframes (1m, 5m, 15m, 1h, 4h) before generating this trade.",
   "Current order book data from Binance shows volume is active. The trade setup remains valid as long as price stays above the stop loss level.",
   "Risk management is key. The stop loss is ATR-based (1.2x Average True Range), ensuring it's placed at a statistically meaningful level, not an arbitrary one.",
 ];
+
+const DEEP_SCAN_MESSAGES = [
+  "📡 Fetching live market data...",
+  "📊 Running 18-gate analysis...",
+  "🔬 Checking stop-hunt protection...",
+  "📈 Verifying trend confirmation...",
+  "✅ Computing final verdict...",
+];
+
+// ─── WIN RATE TRACKER COMPONENT ──────────────────────────────────────────────
+
+function WinRateTracker({
+  wins,
+  losses,
+}: {
+  wins: number;
+  losses: number;
+}) {
+  const total = wins + losses;
+  const rate = total > 0 ? Math.round((wins / total) * 100) : 0;
+  const color = rate >= 70 ? "#22C55E" : rate >= 50 ? "#EAB308" : "#EF4444";
+  const bgColor =
+    rate >= 70
+      ? "rgba(34,197,94,0.12)"
+      : rate >= 50
+        ? "rgba(234,179,8,0.12)"
+        : "rgba(239,68,68,0.12)";
+  const borderColor =
+    rate >= 70
+      ? "rgba(34,197,94,0.3)"
+      : rate >= 50
+        ? "rgba(234,179,8,0.3)"
+        : "rgba(239,68,68,0.3)";
+
+  return (
+    <div
+      className="rounded-2xl p-4 flex items-center justify-between gap-4"
+      style={{
+        background: bgColor,
+        border: `1px solid ${borderColor}`,
+      }}
+      data-ocid="tracking.win_rate.tracker"
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-11 h-11 rounded-full flex items-center justify-center font-black text-lg"
+          style={{
+            background: `conic-gradient(${color} ${rate * 3.6}deg, rgba(255,255,255,0.1) 0deg)`,
+            boxShadow: `0 0 12px ${color}40`,
+          }}
+        >
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{
+              background: "#0B1F3B",
+              color,
+              fontSize: "0.6rem",
+              fontWeight: 900,
+            }}
+          >
+            {rate}%
+          </div>
+        </div>
+        <div>
+          <p className="font-black text-sm" style={{ color }}>
+            Win Rate: {rate}%
+          </p>
+          <p className="text-xs" style={{ color: "rgba(255,255,255,0.5)" }}>
+            {wins} wins / {losses} losses
+            {total === 0 && " — track trades to build history"}
+          </p>
+        </div>
+      </div>
+      <div className="flex gap-3 text-xs">
+        <div className="text-center">
+          <p className="font-black text-green-400 text-base">{wins}</p>
+          <p style={{ color: "rgba(255,255,255,0.4)" }}>Wins</p>
+        </div>
+        <div
+          className="w-px self-stretch"
+          style={{ background: "rgba(255,255,255,0.1)" }}
+        />
+        <div className="text-center">
+          <p className="font-black text-red-400 text-base">{losses}</p>
+          <p style={{ color: "rgba(255,255,255,0.4)" }}>Losses</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── VERDICT RESULT PANEL ─────────────────────────────────────────────────────
+
+function VerdictPanel({
+  dv,
+  targetPrice,
+}: { dv: UltraDeepVerdict; targetPrice: number }) {
+  const isConfirmed = dv.verdict === "CONFIRMED_HIT_TP";
+  const isMonitoring = dv.verdict === "MONITORING";
+
+  if (isConfirmed) {
+    return (
+      <div
+        className="rounded-xl p-4 mb-3"
+        style={{
+          background: "rgba(0, 200, 100, 0.15)",
+          border: "1px solid #00C864",
+          boxShadow: "0 0 20px rgba(0,200,100,0.12)",
+        }}
+        data-ocid="tracking.update.success_state"
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <CheckCircle2
+            className="w-5 h-5 flex-shrink-0"
+            style={{ color: "#00C864" }}
+          />
+          <p
+            className="font-black text-sm tracking-wide"
+            style={{ color: "#00C864" }}
+          >
+            ✅ CONFIRMED — WILL HIT TAKE PROFIT
+          </p>
+        </div>
+        <p className="text-xs mb-1" style={{ color: "rgba(0,200,100,0.8)" }}>
+          {dv.tpProgress.toFixed(1)}% progress toward TP • Confidence:{" "}
+          {dv.compositeScore}%
+        </p>
+        <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.55)" }}>
+          {dv.recommendation}
+        </p>
+        {dv.keyBullishSignals.length > 0 && (
+          <>
+            <div
+              className="border-t mb-2"
+              style={{ borderColor: "rgba(0,200,100,0.2)" }}
+            />
+            <div className="space-y-1">
+              {dv.keyBullishSignals.slice(0, 5).map((sig) => (
+                <p
+                  key={sig}
+                  className="text-xs flex items-center gap-1.5"
+                  style={{ color: "rgba(0,200,100,0.75)" }}
+                >
+                  <span className="font-black" style={{ color: "#00C864" }}>
+                    ✓
+                  </span>{" "}
+                  {sig}
+                </p>
+              ))}
+            </div>
+          </>
+        )}
+        <div
+          className="border-t mt-2 pt-2"
+          style={{ borderColor: "rgba(0,200,100,0.15)" }}
+        >
+          <p
+            className="text-xs flex items-center gap-1"
+            style={{ color: "rgba(0,200,100,0.4)" }}
+          >
+            <Clock className="w-3 h-3" />
+            Current: $
+            {dv.currentPrice.toLocaleString(undefined, {
+              maximumFractionDigits: 6,
+            })}{" "}
+            → Target: $
+            {targetPrice.toLocaleString(undefined, {
+              maximumFractionDigits: 6,
+            })}
+            {dv.estimatedTimeToTP && ` · Est. ${dv.estimatedTimeToTP}`}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isMonitoring) {
+    return (
+      <div
+        className="rounded-xl p-4 mb-3"
+        style={{
+          background: "rgba(255, 165, 0, 0.15)",
+          border: "1px solid #FFA500",
+          boxShadow: "0 0 20px rgba(255,165,0,0.1)",
+        }}
+        data-ocid="tracking.update.monitoring_state"
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <AlertTriangle
+            className="w-5 h-5 flex-shrink-0"
+            style={{ color: "#FFA500" }}
+          />
+          <p
+            className="font-black text-sm tracking-wide"
+            style={{ color: "#FFA500" }}
+          >
+            ⚠️ HOLD — Signal Still Valid
+          </p>
+        </div>
+        <p className="text-xs mb-1" style={{ color: "rgba(255,165,0,0.8)" }}>
+          {dv.tpProgress.toFixed(1)}% progress toward TP • Confidence:{" "}
+          {dv.compositeScore}%
+        </p>
+        <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.55)" }}>
+          {dv.recommendation}
+        </p>
+        {dv.hardExitReasons.length > 0 && (
+          <>
+            <div
+              className="border-t mb-2"
+              style={{ borderColor: "rgba(255,165,0,0.2)" }}
+            />
+            <p
+              className="text-xs font-bold mb-1"
+              style={{ color: "rgba(255,165,0,0.8)" }}
+            >
+              ⚡ Caution Flags:
+            </p>
+            <div className="space-y-1 mb-2">
+              {dv.hardExitReasons.map((r) => (
+                <p
+                  key={r}
+                  className="text-xs flex items-center gap-1.5"
+                  style={{ color: "rgba(255,165,0,0.7)" }}
+                >
+                  <span className="font-black">!</span> {r}
+                </p>
+              ))}
+            </div>
+          </>
+        )}
+        {dv.keyBullishSignals.length > 0 && (
+          <>
+            <div
+              className="border-t mb-2"
+              style={{ borderColor: "rgba(255,165,0,0.2)" }}
+            />
+            <div className="space-y-1">
+              {dv.keyBullishSignals.slice(0, 4).map((sig) => (
+                <p
+                  key={sig}
+                  className="text-xs flex items-center gap-1.5"
+                  style={{ color: "rgba(255,165,0,0.7)" }}
+                >
+                  <span className="font-black">✓</span> {sig}
+                </p>
+              ))}
+            </div>
+          </>
+        )}
+        <div
+          className="border-t mt-2 pt-2"
+          style={{ borderColor: "rgba(255,165,0,0.15)" }}
+        >
+          <p
+            className="text-xs flex items-center gap-1"
+            style={{ color: "rgba(255,165,0,0.4)" }}
+          >
+            <Clock className="w-3 h-3" />
+            Analyzed at {new Date(dv.verdictTimestamp).toLocaleTimeString()}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // EXIT_NOW
+  return (
+    <div
+      className="rounded-xl p-4 mb-3"
+      style={{
+        background: "rgba(255, 50, 50, 0.15)",
+        border: "1px solid #FF3232",
+        boxShadow: "0 0 20px rgba(255,50,50,0.12)",
+      }}
+      data-ocid="tracking.update.exit_state"
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <XCircle
+          className="w-5 h-5 flex-shrink-0"
+          style={{ color: "#FF3232" }}
+        />
+        <p
+          className="font-black text-sm tracking-wide"
+          style={{ color: "#FF3232" }}
+        >
+          🚨 EXIT NOW — Conditions Reversed
+        </p>
+      </div>
+      <p className="text-xs mb-1" style={{ color: "rgba(255,50,50,0.8)" }}>
+        Confidence dropped to {dv.compositeScore}% • Exit immediately
+      </p>
+      <p className="text-xs mb-3" style={{ color: "rgba(255,255,255,0.55)" }}>
+        {dv.recommendation}
+      </p>
+      {dv.hardExitReasons.length > 0 && (
+        <>
+          <div
+            className="border-t mb-2"
+            style={{ borderColor: "rgba(255,50,50,0.2)" }}
+          />
+          <p
+            className="text-xs font-bold mb-1"
+            style={{ color: "rgba(255,50,50,0.8)" }}
+          >
+            🚨 Confirmed Failures:
+          </p>
+          <div className="space-y-1 mb-3">
+            {dv.hardExitReasons.map((r) => (
+              <p
+                key={r}
+                className="text-xs flex items-center gap-1.5"
+                style={{ color: "rgba(255,80,80,0.8)" }}
+              >
+                <span className="font-black text-red-400">✗</span> {r}
+              </p>
+            ))}
+          </div>
+        </>
+      )}
+      <div
+        className="border-t pt-2 mt-1"
+        style={{ borderColor: "rgba(255,50,50,0.2)" }}
+      >
+        <p className="text-xs font-bold" style={{ color: "#FF3232" }}>
+          ⚠️ Exit at market: $
+          {dv.currentPrice.toLocaleString(undefined, {
+            maximumFractionDigits: 6,
+          })}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── TRADE CARD ───────────────────────────────────────────────────────────────
 
 function TrackCard({
   trade,
@@ -175,21 +510,17 @@ function TrackCard({
       100;
   const clamped = Math.max(0, Math.min(100, progress));
 
-  // Detect TP hit
   const tpHit = isBuy
     ? livePrice >= trade.targetPrice
     : livePrice <= trade.targetPrice;
 
-  // Detect SL hit
   const slHit = isBuy
     ? livePrice <= trade.stopLoss
     : livePrice >= trade.stopLoss;
 
-  // Track whether we've already fired the TP notification for this trade
   const tpNotifiedRef = useRef(false);
   const slNotifiedRef = useRef(false);
 
-  // TP hit effect — fire notification and auto-close as win
   useEffect(() => {
     if (
       tpHit &&
@@ -215,7 +546,6 @@ function TrackCard({
     onCloseWin,
   ]);
 
-  // SL hit effect — fire notification and auto-close as loss
   useEffect(() => {
     if (
       slHit &&
@@ -260,6 +590,16 @@ function TrackCard({
   };
 
   const isClosed = trade.outcome === "win" || trade.outcome === "loss";
+
+  // Inline live verdict badge (without deep analysis)
+  const { verdict: cv, suggestion } = computeVerdict(trade, livePrice);
+  const cvColor = getVerdictColor(cv);
+  const cvLabel =
+    cv === "LIKELY"
+      ? "🟢 ON TRACK"
+      : cv === "UNCERTAIN"
+        ? "⚡ MONITORING"
+        : "🔴 AT RISK";
 
   return (
     <motion.div
@@ -353,7 +693,6 @@ function TrackCard({
                 +{trade.profitPercent.toFixed(2)}%
               </span>
             </div>
-            {/* Remove button */}
             <button
               type="button"
               data-ocid="tracking.delete_button"
@@ -406,7 +745,7 @@ function TrackCard({
           ))}
         </div>
 
-        {/* Progress */}
+        {/* Progress Bar */}
         <div className="mb-4">
           <div className="flex justify-between text-xs text-white/30 mb-1">
             <span>Progress to TP</span>
@@ -428,94 +767,90 @@ function TrackCard({
           </div>
         </div>
 
-        {/* Live AI Verdict — uses deep verdict if available, else computeVerdict */}
-        {(() => {
-          if (deepVerdict) {
-            const isConfirmed = deepVerdict.verdict === "CONFIRMED_HIT_TP";
-            const isMonitoring = deepVerdict.verdict === "MONITORING";
-            const dvColor = isConfirmed
-              ? "#22C55E"
-              : isMonitoring
-                ? "#EAB308"
-                : "#EF4444";
-            const dvBg = isConfirmed
-              ? "rgba(34,197,94,0.08)"
-              : isMonitoring
-                ? "rgba(234,179,8,0.08)"
-                : "rgba(239,68,68,0.08)";
-            const dvBorder = isConfirmed
-              ? "rgba(34,197,94,0.25)"
-              : isMonitoring
-                ? "rgba(234,179,8,0.25)"
-                : "rgba(239,68,68,0.25)";
-            const dvLabel = isConfirmed
-              ? "✅ WILL HIT TP — CONFIRMED"
-              : isMonitoring
-                ? "⚠️ HOLD — Minor Weakness, Still Valid"
-                : "🚨 EXIT NOW — TP NOT CONFIRMED";
-            return (
-              <div
-                className="flex items-center gap-3 p-3 rounded-xl mb-3"
-                style={{ background: dvBg, border: `1px solid ${dvBorder}` }}
-              >
-                <span style={{ color: dvColor }}>
-                  {isConfirmed ? (
-                    <CheckCircle2 className="w-4 h-4" />
-                  ) : isMonitoring ? (
-                    <AlertTriangle className="w-4 h-4" />
-                  ) : (
-                    <XCircle className="w-4 h-4" />
-                  )}
-                </span>
-                <div className="flex-1">
-                  <p
-                    className="text-xs font-black mb-0.5"
-                    style={{ color: dvColor }}
-                  >
-                    {dvLabel}
-                  </p>
-                  <p className="text-white/50 text-xs leading-relaxed">
-                    Score: {deepVerdict.compositeScore}/100 ·{" "}
-                    {isMonitoring
-                      ? `${deepVerdict.hardExitCount} minor flag(s) · ${deepVerdict.tpProgress.toFixed(1)}% to TP`
-                      : `${deepVerdict.bullishCount} bullish signals confirmed`}
-                  </p>
-                </div>
-              </div>
-            );
-          }
-          // Fallback: computeVerdict badge with updated labels
-          const { verdict: cv, suggestion } = computeVerdict(trade, livePrice);
-          const cvColor = getVerdictColor(cv);
-          const cvLabel =
-            cv === "LIKELY"
-              ? "🟢 ON TRACK"
-              : cv === "UNCERTAIN"
-                ? "⚡ MONITORING"
-                : "🔴 AT RISK";
-          return (
-            <div
-              className="flex items-center gap-3 p-3 rounded-xl mb-3"
+        {/* Live AI Verdict Badge — shows deep verdict if available, fallback otherwise */}
+        {deepVerdict ? (
+          <div
+            className="flex items-center gap-3 p-3 rounded-xl mb-3"
+            style={{
+              background:
+                deepVerdict.verdict === "CONFIRMED_HIT_TP"
+                  ? "rgba(0,200,100,0.08)"
+                  : deepVerdict.verdict === "MONITORING"
+                    ? "rgba(255,165,0,0.08)"
+                    : "rgba(255,50,50,0.08)",
+              border: `1px solid ${
+                deepVerdict.verdict === "CONFIRMED_HIT_TP"
+                  ? "rgba(0,200,100,0.25)"
+                  : deepVerdict.verdict === "MONITORING"
+                    ? "rgba(255,165,0,0.25)"
+                    : "rgba(255,50,50,0.25)"
+              }`,
+            }}
+          >
+            <span
               style={{
-                background: `${cvColor}12`,
-                border: `1px solid ${cvColor}30`,
+                color:
+                  deepVerdict.verdict === "CONFIRMED_HIT_TP"
+                    ? "#00C864"
+                    : deepVerdict.verdict === "MONITORING"
+                      ? "#FFA500"
+                      : "#FF3232",
               }}
             >
-              <span style={{ color: cvColor }}>{getVerdictIcon(cv)}</span>
-              <div className="flex-1">
-                <p
-                  className="text-xs font-black mb-0.5"
-                  style={{ color: cvColor }}
-                >
-                  {cvLabel}
-                </p>
-                <p className="text-white/50 text-xs leading-relaxed">
-                  {suggestion}
-                </p>
-              </div>
+              {deepVerdict.verdict === "CONFIRMED_HIT_TP" ? (
+                <CheckCircle2 className="w-4 h-4" />
+              ) : deepVerdict.verdict === "MONITORING" ? (
+                <AlertTriangle className="w-4 h-4" />
+              ) : (
+                <XCircle className="w-4 h-4" />
+              )}
+            </span>
+            <div className="flex-1">
+              <p
+                className="text-xs font-black mb-0.5"
+                style={{
+                  color:
+                    deepVerdict.verdict === "CONFIRMED_HIT_TP"
+                      ? "#00C864"
+                      : deepVerdict.verdict === "MONITORING"
+                        ? "#FFA500"
+                        : "#FF3232",
+                }}
+              >
+                {deepVerdict.verdict === "CONFIRMED_HIT_TP"
+                  ? "✅ CONFIRMED — WILL HIT TAKE PROFIT"
+                  : deepVerdict.verdict === "MONITORING"
+                    ? "⚠️ HOLD — Signal Still Valid"
+                    : "🚨 EXIT NOW — Conditions Reversed"}
+              </p>
+              <p className="text-white/50 text-xs">
+                Score: {deepVerdict.compositeScore}/100 ·{" "}
+                {deepVerdict.tpProgress.toFixed(1)}% to TP
+              </p>
             </div>
-          );
-        })()}
+          </div>
+        ) : (
+          <div
+            className="flex items-center gap-3 p-3 rounded-xl mb-3"
+            style={{
+              background: `${cvColor}12`,
+              border: `1px solid ${cvColor}30`,
+            }}
+          >
+            <span style={{ color: cvColor }}>{getVerdictIcon(cv)}</span>
+            <div className="flex-1">
+              <p
+                className="text-xs font-black mb-0.5"
+                style={{ color: cvColor }}
+              >
+                {cvLabel}
+              </p>
+              <p className="text-white/50 text-xs leading-relaxed">
+                {suggestion}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Meta */}
         <div className="flex items-center justify-between text-xs text-white/30 mb-3">
@@ -530,38 +865,30 @@ function TrackCard({
           </span>
         </div>
 
-        {/* ── ULTRA DEEP VERDICT BUTTON ─────────────────────────────────── */}
+        {/* ── DEEP VERDICT BUTTON ─────────────────────────────────────────── */}
         <div className="mb-3">
           <button
             type="button"
             data-ocid="tracking.update.button"
             onClick={onDeepVerdict}
             disabled={deepVerdictLoading}
-            className="w-full py-3.5 px-5 rounded-xl font-black text-sm transition-all duration-300 flex items-center justify-center gap-2.5 relative overflow-hidden"
+            className="w-full py-3 px-5 rounded-xl font-black text-sm transition-all duration-300 flex items-center justify-center gap-2.5 relative overflow-hidden"
             style={{
               background: deepVerdictLoading
                 ? "linear-gradient(135deg, #1a1a2e, #16213e)"
-                : "linear-gradient(135deg, #0d1117 0%, #1a0a00 50%, #0d1117 100%)",
-              color: deepVerdictLoading ? "#9ca3af" : "#fbbf24",
+                : "linear-gradient(135deg, #B8860B 0%, #FFD700 50%, #B8860B 100%)",
+              color: deepVerdictLoading ? "#9ca3af" : "#1a1a1a",
               border: deepVerdictLoading
                 ? "2px solid rgba(156,163,175,0.3)"
-                : "2px solid #d97706",
+                : "none",
               boxShadow: deepVerdictLoading
                 ? "none"
-                : "0 0 20px rgba(217,119,6,0.5), 0 0 40px rgba(217,119,6,0.2), inset 0 1px 0 rgba(251,191,36,0.1)",
+                : "0 4px 15px rgba(255, 215, 0, 0.4), 0 2px 8px rgba(184,134,11,0.3)",
               cursor: deepVerdictLoading ? "not-allowed" : "pointer",
+              borderRadius: "8px",
+              padding: "10px 20px",
             }}
           >
-            {/* Gold shimmer effect when idle */}
-            {!deepVerdictLoading && (
-              <span
-                className="absolute inset-0 opacity-0 hover:opacity-10 transition-opacity duration-500 pointer-events-none"
-                style={{
-                  background:
-                    "linear-gradient(90deg, transparent, rgba(251,191,36,0.4), transparent)",
-                }}
-              />
-            )}
             {deepVerdictLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -571,17 +898,14 @@ function TrackCard({
               <>
                 <Zap
                   className="w-4 h-4"
-                  style={{ filter: "drop-shadow(0 0 4px #fbbf24)" }}
+                  style={{ filter: "drop-shadow(0 0 3px rgba(0,0,0,0.4))" }}
                 />
-                <span
-                  className="tracking-widest uppercase"
-                  style={{ textShadow: "0 0 10px rgba(251,191,36,0.5)" }}
-                >
-                  ⚡ UPDATE VERDICT
+                <span className="tracking-widest uppercase font-black">
+                  🔍 Deep Analysis
                 </span>
                 <Zap
                   className="w-4 h-4"
-                  style={{ filter: "drop-shadow(0 0 4px #fbbf24)" }}
+                  style={{ filter: "drop-shadow(0 0 3px rgba(0,0,0,0.4))" }}
                 />
               </>
             )}
@@ -590,265 +914,14 @@ function TrackCard({
             className="text-center text-xs mt-1.5"
             style={{ color: "rgba(212,175,55,0.45)" }}
           >
-            Deep analysis · 5 timeframes · 30+ indicators · Absolute verdict
+            5 timeframes · 30+ indicators · Absolute verdict
           </p>
         </div>
 
-        {/* ── DEEP VERDICT RESULT PANEL ─────────────────────────────────── */}
-        {deepVerdict &&
-          (() => {
-            const isConfirmed = deepVerdict.verdict === "CONFIRMED_HIT_TP";
-            const isMonitoring = deepVerdict.verdict === "MONITORING";
-
-            if (isConfirmed) {
-              return (
-                <div
-                  className="rounded-xl p-4 mb-3"
-                  style={{
-                    background: "rgba(5,46,22,0.95)",
-                    border: "1px solid rgba(34,197,94,0.6)",
-                    boxShadow: "0 0 20px rgba(34,197,94,0.15)",
-                  }}
-                  data-ocid="tracking.update.success_state"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0" />
-                    <p className="text-green-400 font-black text-sm tracking-wide">
-                      ✅ CONFIRMED — WILL HIT TAKE PROFIT
-                    </p>
-                  </div>
-                  <p className="text-green-500/70 text-xs mb-3">
-                    Composite Score: {deepVerdict.compositeScore}/100 ·{" "}
-                    {deepVerdict.bullishCount} bullish signals aligned
-                    {deepVerdict.hardExitCount === 1 &&
-                      " · 1 minor flag present"}
-                  </p>
-                  <div className="border-t border-green-500/20 mb-3" />
-                  <div className="space-y-1 mb-3">
-                    <p className="text-green-300 text-xs font-bold">
-                      📈 Progress: {deepVerdict.tpProgress.toFixed(1)}% to TP
-                      {deepVerdict.estimatedTimeToTP &&
-                        ` · Est. ${deepVerdict.estimatedTimeToTP}`}
-                    </p>
-                    <p className="text-green-300/80 text-xs">
-                      💰 Current: $
-                      {deepVerdict.currentPrice.toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })}{" "}
-                      → Target: $
-                      {trade.targetPrice.toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })}
-                    </p>
-                  </div>
-                  {deepVerdict.keyBullishSignals.length > 0 && (
-                    <>
-                      <div className="border-t border-green-500/20 mb-2" />
-                      <div className="space-y-1">
-                        {deepVerdict.keyBullishSignals
-                          .slice(0, 5)
-                          .map((sig) => (
-                            <p
-                              key={sig}
-                              className="text-green-400/80 text-xs flex items-center gap-1.5"
-                            >
-                              <span className="text-green-500 font-black">
-                                ✓
-                              </span>{" "}
-                              {sig}
-                            </p>
-                          ))}
-                      </div>
-                    </>
-                  )}
-                  <div className="border-t border-green-500/20 mt-2 pt-2">
-                    <p className="text-green-500/40 text-xs flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      Verified at{" "}
-                      {new Date(
-                        deepVerdict.verdictTimestamp,
-                      ).toLocaleTimeString()}
-                    </p>
-                  </div>
-                </div>
-              );
-            }
-
-            if (isMonitoring) {
-              return (
-                <div
-                  className="rounded-xl p-4 mb-3"
-                  style={{
-                    background: "rgba(45,36,5,0.95)",
-                    border: "1px solid rgba(234,179,8,0.6)",
-                    boxShadow: "0 0 20px rgba(234,179,8,0.12)",
-                  }}
-                  data-ocid="tracking.update.monitoring_state"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
-                    <p className="text-yellow-400 font-black text-sm tracking-wide">
-                      ⚠️ HOLD — Signal Still Valid
-                    </p>
-                  </div>
-                  <p className="text-yellow-500/70 text-xs mb-3">
-                    Score: {deepVerdict.compositeScore}/100 · Minor indicator
-                    weakness detected
-                    {deepVerdict.hardExitCount > 0 &&
-                      ` · ${deepVerdict.hardExitCount} caution flag${deepVerdict.hardExitCount > 1 ? "s" : ""}`}
-                  </p>
-                  <div className="border-t border-yellow-500/20 mb-3" />
-                  <div className="space-y-1 mb-3">
-                    <p className="text-yellow-300 text-xs font-bold">
-                      📊 Progress: {deepVerdict.tpProgress.toFixed(1)}% toward
-                      TP · Monitor closely
-                    </p>
-                    <p className="text-yellow-300/80 text-xs">
-                      💰 Current: $
-                      {deepVerdict.currentPrice.toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })}{" "}
-                      → Target: $
-                      {trade.targetPrice.toLocaleString(undefined, {
-                        maximumFractionDigits: 6,
-                      })}
-                    </p>
-                  </div>
-                  {/* Show caution flags if any */}
-                  {deepVerdict.hardExitReasons.length > 0 && (
-                    <>
-                      <div className="border-t border-yellow-500/20 mb-2" />
-                      <p className="text-yellow-400/80 text-xs font-bold mb-1">
-                        ⚡ Caution Flags:
-                      </p>
-                      <div className="space-y-1 mb-2">
-                        {deepVerdict.hardExitReasons.map((reason) => (
-                          <p
-                            key={reason}
-                            className="text-yellow-400/70 text-xs flex items-center gap-1.5"
-                          >
-                            <span className="text-yellow-500 font-black">
-                              !
-                            </span>{" "}
-                            {reason}
-                          </p>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  {deepVerdict.keyBullishSignals.length > 0 && (
-                    <>
-                      <div className="border-t border-yellow-500/20 mb-2" />
-                      <p className="text-yellow-400/80 text-xs font-bold mb-1">
-                        ✓ Still Bullish:
-                      </p>
-                      <div className="space-y-1">
-                        {deepVerdict.keyBullishSignals
-                          .slice(0, 4)
-                          .map((sig) => (
-                            <p
-                              key={sig}
-                              className="text-yellow-300/70 text-xs flex items-center gap-1.5"
-                            >
-                              <span className="text-yellow-500 font-black">
-                                ✓
-                              </span>{" "}
-                              {sig}
-                            </p>
-                          ))}
-                      </div>
-                    </>
-                  )}
-                  <div className="border-t border-yellow-500/20 mt-2 pt-2">
-                    <p className="text-yellow-500/40 text-xs flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      Analyzed at{" "}
-                      {new Date(
-                        deepVerdict.verdictTimestamp,
-                      ).toLocaleTimeString()}
-                    </p>
-                  </div>
-                </div>
-              );
-            }
-
-            // EXIT_NOW_NO_TP
-            return (
-              <div
-                className="rounded-xl p-4 mb-3"
-                style={{
-                  background: "rgba(69,10,10,0.95)",
-                  border: "1px solid rgba(239,68,68,0.6)",
-                  boxShadow: "0 0 20px rgba(239,68,68,0.15)",
-                }}
-                data-ocid="tracking.update.exit_state"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <XCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-                  <p className="text-red-400 font-black text-sm tracking-wide">
-                    🚨 EXIT NOW — MULTIPLE FAILURES CONFIRMED
-                  </p>
-                </div>
-                <p className="text-red-500/70 text-xs mb-3">
-                  Score: {deepVerdict.compositeScore}/100 ·{" "}
-                  {deepVerdict.hardExitCount} confirmation failure
-                  {deepVerdict.hardExitCount !== 1 ? "s" : ""} detected
-                </p>
-                <div className="border-t border-red-500/20 mb-3" />
-                <p className="text-red-300 text-xs font-bold mb-3">
-                  ⚠️ Exit at market price: $
-                  {deepVerdict.currentPrice.toLocaleString(undefined, {
-                    maximumFractionDigits: 6,
-                  })}
-                </p>
-                {/* Show all fired exit reasons */}
-                {deepVerdict.hardExitReasons.length > 0 && (
-                  <>
-                    <div className="border-t border-red-500/20 mb-2" />
-                    <p className="text-red-400/80 text-xs font-bold mb-1">
-                      🚨 Confirmed Failures:
-                    </p>
-                    <div className="space-y-1 mb-3">
-                      {deepVerdict.hardExitReasons.map((reason) => (
-                        <p
-                          key={reason}
-                          className="text-red-400/80 text-xs flex items-center gap-1.5"
-                        >
-                          <span className="text-red-500 font-black">✗</span>{" "}
-                          {reason}
-                        </p>
-                      ))}
-                    </div>
-                  </>
-                )}
-                {deepVerdict.keyBearishSignals.length > 0 && (
-                  <>
-                    <div className="border-t border-red-500/20 mb-2" />
-                    <div className="space-y-1">
-                      {deepVerdict.keyBearishSignals.slice(0, 5).map((sig) => (
-                        <p
-                          key={sig}
-                          className="text-red-400/80 text-xs flex items-center gap-1.5"
-                        >
-                          <span className="text-red-500 font-black">✗</span>{" "}
-                          {sig}
-                        </p>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <div className="border-t border-red-500/20 mt-2 pt-2">
-                  <p className="text-red-500/40 text-xs flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    Verified at{" "}
-                    {new Date(
-                      deepVerdict.verdictTimestamp,
-                    ).toLocaleTimeString()}
-                  </p>
-                </div>
-              </div>
-            );
-          })()}
+        {/* ── DEEP VERDICT RESULT PANEL ──────────────────────────────────── */}
+        {deepVerdict && (
+          <VerdictPanel dv={deepVerdict} targetPrice={trade.targetPrice} />
+        )}
 
         {/* Manual Mark TP / SL buttons */}
         <div className="flex gap-2 mb-2">
@@ -890,7 +963,7 @@ function TrackCard({
           </button>
         </div>
 
-        {/* Update result banner */}
+        {/* Legacy update result banner */}
         {updateResult && (
           <div
             className="mb-2 p-2 rounded-xl text-xs leading-relaxed"
@@ -898,14 +971,9 @@ function TrackCard({
               background: updateResult.passed
                 ? "rgba(34,197,94,0.1)"
                 : "rgba(234,179,8,0.1)",
-              border: `1px solid ${
-                updateResult.passed
-                  ? "rgba(34,197,94,0.3)"
-                  : "rgba(234,179,8,0.3)"
-              }`,
+              border: `1px solid ${updateResult.passed ? "rgba(34,197,94,0.3)" : "rgba(234,179,8,0.3)"}`,
               color: updateResult.passed ? "#22C55E" : "#EAB308",
             }}
-            data-ocid="tracking.update.success_state"
           >
             {updateResult.details}
           </div>
@@ -954,9 +1022,7 @@ function TrackCard({
               {msgs.map((m, i) => (
                 <div
                   key={`msg-${i}-${m.role}`}
-                  className={`flex ${
-                    m.role === "user" ? "justify-end" : "justify-start"
-                  }`}
+                  className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
                     className="max-w-xs rounded-xl px-3 py-2 text-xs"
@@ -999,12 +1065,13 @@ function TrackCard({
   );
 }
 
+// ─── TRACKING PAGE ────────────────────────────────────────────────────────────
+
 export function TrackingPage() {
   const { user, updateProfile } = useAuth();
   const { actor } = useActor();
   const storageKey = user ? `wb_tracked_${user.uid}` : "wb_tracked_guest";
 
-  // Initialize empty; load from per-user key in effect
   const [tracked, setTracked] = useState<TrackedTrade[]>([]);
   const [tradeHistory, setTradeHistory] = useState<TradeAnalysisEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -1036,8 +1103,6 @@ export function TrackingPage() {
         const saved = localStorage.getItem(storageKey);
         const localTrades: TrackedTrade[] = saved ? JSON.parse(saved) : [];
         setTracked(localTrades);
-
-        // Merge from cloud using per-user tracked trade endpoint
         if (actor && user) {
           try {
             const cloudRecords = await actor.getTrackedTradesForUser(user.uid);
@@ -1072,7 +1137,6 @@ export function TrackingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, actor, user]);
 
-  // Auto-refresh every 15 seconds
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastRefreshed, setLastRefreshed] = useState(new Date());
 
@@ -1090,15 +1154,12 @@ export function TrackingPage() {
       const currentTrades: TrackedTrade[] = JSON.parse(
         localStorage.getItem(storageKey) ?? "[]",
       );
-      if (currentTrades.length > 0) {
-        syncToCloud(currentTrades);
-      }
+      if (currentTrades.length > 0) syncToCloud(currentTrades);
     }, 30000);
     return () => clearInterval(id);
   }, [storageKey, syncToCloud]);
 
-  // Load trade analysis history
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is intentionally used as a trigger
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick is intentionally used as trigger
   useEffect(() => {
     const uid = user?.uid ?? "guest";
     try {
@@ -1111,13 +1172,11 @@ export function TrackingPage() {
     }
   }, [user, refreshTick]);
 
-  // Remove a tracked trade by ID
   const removeTrade = useCallback(
     (id: string) => {
       const updated = tracked.filter((t) => t.id !== id);
       setTracked(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
-      // Delete from cloud and sync remaining
       if (actor && user) {
         actor.deleteTrackedTrade(id).catch(() => {});
         syncToCloud(updated);
@@ -1126,7 +1185,6 @@ export function TrackingPage() {
     [tracked, storageKey, actor, user, syncToCloud],
   );
 
-  // Close trade as WIN
   const closeTradeAsWin = useCallback(
     (trade: TrackedTrade, livePrice: number) => {
       const uid = user?.uid ?? "guest";
@@ -1143,9 +1201,7 @@ export function TrackingPage() {
         profitPercent: trade.profitPercent,
         closedAt: new Date().toISOString(),
         addedAt: trade.addedAt,
-        aiNote: `WIN: ${trade.coinName} hit take profit at $${trade.targetPrice.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. Profit: +${trade.profitPercent.toFixed(2)}%. Multi-TF confluence was ${
-          trade.multiTimeframeConfluence ? "active" : "partial"
-        }. RSI at entry: ${trade.rsiValue.toFixed(1)}. This pattern reinforces our ${trade.trend} trend + ${trade.direction} signal logic.`,
+        aiNote: `WIN: ${trade.coinName} hit take profit at $${trade.targetPrice.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. Profit: +${trade.profitPercent.toFixed(2)}%. Multi-TF confluence was ${trade.multiTimeframeConfluence ? "active" : "partial"}. RSI at entry: ${trade.rsiValue.toFixed(1)}.`,
       };
       const logKey = `wb_trade_analysis_${uid}`;
       const existing: TradeAnalysisEntry[] = JSON.parse(
@@ -1175,7 +1231,6 @@ export function TrackingPage() {
       );
       setTracked(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
-      // Sync to cloud
       syncToCloud(updated);
       toast.success(
         `🎯 ${trade.coinName} marked as WIN! Trade history updated.`,
@@ -1184,7 +1239,6 @@ export function TrackingPage() {
     [tracked, storageKey, user, updateProfile, syncToCloud],
   );
 
-  // Close trade as LOSS
   const closeTradeAsLoss = useCallback(
     (trade: TrackedTrade, livePrice: number) => {
       const uid = user?.uid ?? "guest";
@@ -1201,7 +1255,7 @@ export function TrackingPage() {
         profitPercent: -Math.abs(trade.profitPercent),
         closedAt: new Date().toISOString(),
         addedAt: trade.addedAt,
-        aiNote: `LOSS: ${trade.coinName} hit stop loss at $${trade.stopLoss.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. RSI at entry: ${trade.rsiValue.toFixed(1)}, Trend: ${trade.trend}. This trade is flagged for AI learning to improve signal filtering. Symbol added to SL blacklist.`,
+        aiNote: `LOSS: ${trade.coinName} hit stop loss at $${trade.stopLoss.toFixed(4)}. Entry was $${trade.entryPrice.toFixed(4)}. RSI at entry: ${trade.rsiValue.toFixed(1)}, Trend: ${trade.trend}.`,
       };
       const logKey = `wb_trade_analysis_${uid}`;
       const existing: TradeAnalysisEntry[] = JSON.parse(
@@ -1210,17 +1264,6 @@ export function TrackingPage() {
       const updatedLog = [analysis, ...existing];
       localStorage.setItem(logKey, JSON.stringify(updatedLog));
       setTradeHistory(updatedLog);
-
-      // Add symbol to global SL blacklist
-      const slHits: string[] = JSON.parse(
-        localStorage.getItem("wb_sl_hits") ?? "[]",
-      );
-      if (!slHits.includes(trade.symbol)) {
-        localStorage.setItem(
-          "wb_sl_hits",
-          JSON.stringify([...slHits, trade.symbol]),
-        );
-      }
 
       const current = user?.tradeHistory ?? { total: 0, wins: 0, losses: 0 };
       updateProfile({
@@ -1242,19 +1285,15 @@ export function TrackingPage() {
       );
       setTracked(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
-      // Sync to cloud
       syncToCloud(updated);
-      toast.error(
-        `⛔ ${trade.coinName} marked as LOSS. Symbol blacklisted from future signals.`,
-      );
+      toast.error(`⛔ ${trade.coinName} marked as LOSS.`);
     },
     [tracked, storageKey, user, updateProfile, syncToCloud],
   );
 
-  // Legacy update verdict states (kept for updateResult banner backward compat)
   const [updateResults] = useState<Record<string, UpdateResultData>>({});
 
-  // ── DEEP VERDICT STATE ────────────────────────────────────────────────────
+  // ── DEEP VERDICT STATE ──────────────────────────────────────────────────────
   const [tradeVerdicts, setTradeVerdicts] = useState<
     Record<string, UltraDeepVerdict>
   >({});
@@ -1264,14 +1303,6 @@ export function TrackingPage() {
   const [verdictMessages, setVerdictMessages] = useState<
     Record<string, string>
   >({});
-
-  const DEEP_SCAN_MESSAGES = [
-    "🔍 Fetching live market data...",
-    "📊 Analyzing 5 timeframes...",
-    "⚡ Running 30+ indicators...",
-    "🧮 Computing composite score...",
-    "🎯 Generating final verdict...",
-  ];
 
   const handleDeepVerdict = useCallback(
     async (trade: TrackedTrade, lp: number) => {
@@ -1288,16 +1319,16 @@ export function TrackingPage() {
           ...prev,
           [tradeId]: DEEP_SCAN_MESSAGES[msgIdx],
         }));
-      }, 800);
+      }, 1200);
       try {
         const verdict = await ultraDeepVerdictAnalysis(
-          trade.symbol,
           {
+            symbol: trade.symbol,
             entryPrice: trade.entryPrice,
             targetPrice: trade.targetPrice,
             stopLoss: trade.stopLoss,
-            direction: trade.direction,
-          },
+            direction: trade.direction as "BUY" | "SELL",
+          } as Parameters<typeof ultraDeepVerdictAnalysis>[0],
           lp,
         );
         setTradeVerdicts((prev) => ({ ...prev, [tradeId]: verdict }));
@@ -1307,7 +1338,6 @@ export function TrackingPage() {
         clearInterval(msgInterval);
         setVerdictLoading((prev) => ({ ...prev, [tradeId]: false }));
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [],
   );
@@ -1318,10 +1348,17 @@ export function TrackingPage() {
     6000,
   );
 
-  // Sort by time — newest first
   const sortedTracks = [...tracked].sort(
     (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime(),
   );
+
+  // Compute win/loss totals from user profile + trade history
+  const wins =
+    user?.tradeHistory?.wins ??
+    tradeHistory.filter((t) => t.outcome === "WIN").length;
+  const losses =
+    user?.tradeHistory?.losses ??
+    tradeHistory.filter((t) => t.outcome === "LOSS").length;
 
   return (
     <div className="space-y-6" data-ocid="tracking.page">
@@ -1350,6 +1387,9 @@ export function TrackingPage() {
         </div>
       </div>
 
+      {/* Win Rate Tracker */}
+      <WinRateTracker wins={wins} losses={losses} />
+
       {/* AI Summary */}
       <div
         className="glass-card p-4 flex items-center gap-4"
@@ -1361,9 +1401,9 @@ export function TrackingPage() {
             AI Live Monitoring Active
           </p>
           <p className="text-gray-500 text-xs">
-            Verdicts recomputed from Binance price feeds every 15s. Update
-            Verdict button runs a full re-analysis with RSI, MACD, multi-TF
-            confluence check. Cloud sync every 30s.
+            Verdicts recomputed from Binance price feeds every 15s. Deep
+            Analysis button runs full re-analysis with 30+ indicators across 5
+            timeframes. Cloud sync every 30s.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 ml-auto">
@@ -1394,8 +1434,7 @@ export function TrackingPage() {
           data-ocid="tracking.list"
         >
           {sortedTracks.map((trade, i) => {
-            const livePrice =
-              livePrices[trade.symbol]?.price ?? trade.currentPrice;
+            const livePrice = livePrices[trade.symbol] ?? trade.currentPrice;
             return (
               <div key={trade.id} data-ocid={`tracking.item.${i + 1}`}>
                 <TrackCard
@@ -1418,7 +1457,7 @@ export function TrackingPage() {
         </div>
       )}
 
-      {/* Trade History & Deep Analysis Section */}
+      {/* Trade History Section */}
       <div className="mt-8">
         <button
           type="button"
@@ -1492,17 +1531,10 @@ export function TrackingPage() {
                       className="rounded-2xl p-4"
                       style={{
                         background: "linear-gradient(135deg, #0B1F3B, #0A254A)",
-                        border: `1px solid ${
-                          entry.outcome === "WIN"
-                            ? "rgba(34,197,94,0.35)"
-                            : "rgba(239,68,68,0.35)"
-                        }`,
-                        borderLeft: `4px solid ${
-                          entry.outcome === "WIN" ? "#22C55E" : "#EF4444"
-                        }`,
+                        border: `1px solid ${entry.outcome === "WIN" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`,
+                        borderLeft: `4px solid ${entry.outcome === "WIN" ? "#22C55E" : "#EF4444"}`,
                       }}
                     >
-                      {/* Card header */}
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                           <div
@@ -1535,11 +1567,7 @@ export function TrackingPage() {
                                 entry.direction === "BUY"
                                   ? "#22C55E"
                                   : "#EF4444",
-                              border: `1px solid ${
-                                entry.direction === "BUY"
-                                  ? "rgba(34,197,94,0.3)"
-                                  : "rgba(239,68,68,0.3)"
-                              }`,
+                              border: `1px solid ${entry.direction === "BUY" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
                             }}
                           >
                             {entry.direction}
@@ -1553,11 +1581,7 @@ export function TrackingPage() {
                                   : "rgba(239,68,68,0.2)",
                               color:
                                 entry.outcome === "WIN" ? "#22C55E" : "#EF4444",
-                              border: `1px solid ${
-                                entry.outcome === "WIN"
-                                  ? "rgba(34,197,94,0.4)"
-                                  : "rgba(239,68,68,0.4)"
-                              }`,
+                              border: `1px solid ${entry.outcome === "WIN" ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"}`,
                             }}
                           >
                             {entry.outcome === "WIN" ? "✅ WIN" : "❌ LOSS"}
@@ -1570,57 +1594,43 @@ export function TrackingPage() {
                         </div>
                       </div>
 
-                      {/* Price data */}
                       <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-                        <div
-                          className="rounded-lg p-2"
-                          style={{ background: "rgba(255,255,255,0.05)" }}
-                        >
-                          <p className="text-white/40 mb-0.5">Entry</p>
-                          <p className="font-bold text-white">
-                            $
-                            {entry.entryPrice.toLocaleString(undefined, {
-                              maximumFractionDigits: 4,
-                            })}
-                          </p>
-                        </div>
-                        <div
-                          className="rounded-lg p-2"
-                          style={{ background: "rgba(255,255,255,0.05)" }}
-                        >
-                          <p className="text-white/40 mb-0.5">Close</p>
-                          <p
-                            className="font-bold"
-                            style={{
-                              color:
-                                entry.outcome === "WIN" ? "#22C55E" : "#EF4444",
-                            }}
+                        {[
+                          {
+                            label: "Entry",
+                            val: `$${entry.entryPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
+                            color: "text-white",
+                          },
+                          {
+                            label: "Close",
+                            val: `$${entry.closePrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
+                            color:
+                              entry.outcome === "WIN"
+                                ? "text-green-400"
+                                : "text-red-400",
+                          },
+                          {
+                            label: "P&L",
+                            val: `${entry.outcome === "WIN" ? "+" : ""}${entry.profitPercent.toFixed(2)}%`,
+                            color:
+                              entry.outcome === "WIN"
+                                ? "text-green-400"
+                                : "text-red-400",
+                          },
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            className="rounded-lg p-2"
+                            style={{ background: "rgba(255,255,255,0.05)" }}
                           >
-                            $
-                            {entry.closePrice.toLocaleString(undefined, {
-                              maximumFractionDigits: 4,
-                            })}
-                          </p>
-                        </div>
-                        <div
-                          className="rounded-lg p-2"
-                          style={{ background: "rgba(255,255,255,0.05)" }}
-                        >
-                          <p className="text-white/40 mb-0.5">P&amp;L</p>
-                          <p
-                            className="font-bold"
-                            style={{
-                              color:
-                                entry.outcome === "WIN" ? "#22C55E" : "#EF4444",
-                            }}
-                          >
-                            {entry.outcome === "WIN" ? "+" : ""}
-                            {entry.profitPercent.toFixed(2)}%
-                          </p>
-                        </div>
+                            <p className="text-white/40 mb-0.5">{item.label}</p>
+                            <p className={`font-bold ${item.color}`}>
+                              {item.val}
+                            </p>
+                          </div>
+                        ))}
                       </div>
 
-                      {/* AI Note */}
                       <div
                         className="rounded-xl p-3 mb-2"
                         style={{
@@ -1639,7 +1649,6 @@ export function TrackingPage() {
                         </p>
                       </div>
 
-                      {/* Date */}
                       <p className="text-white/30 text-xs flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         Closed:{" "}

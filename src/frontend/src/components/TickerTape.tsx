@@ -1,5 +1,5 @@
 import { TrendingDown, TrendingUp } from "lucide-react";
-import { useLivePrices } from "../hooks/useMarketData";
+import { useLivePricesLegacy } from "../hooks/useMarketData";
 
 const TICKER_SYMBOLS = [
   "BTC",
@@ -15,7 +15,7 @@ const TICKER_SYMBOLS = [
 ];
 
 export function TickerTape() {
-  const prices = useLivePrices(TICKER_SYMBOLS, 8000);
+  const prices = useLivePricesLegacy(TICKER_SYMBOLS, 8000);
 
   const firstLoop = TICKER_SYMBOLS.map((sym) => ({ sym, loop: "a" }));
   const secondLoop = TICKER_SYMBOLS.map((sym) => ({ sym, loop: "b" }));
