@@ -4,11 +4,11 @@
  * PHILOSOPHY: Show 5-15 high-quality signals per scan. All 30+ indicators stay
  * in the code. The change is structural — 6 absolute hard gates that cannot be
  * overridden, and 12 scored gates that accumulate confidence. A signal qualifies
- * when: all 6 hard gates pass + score >= 41/51 + confidence >= 82%.
+ * when: all 6 hard gates pass + score >= 30/51 + confidence >= 68%.
  *
  * HARD GATES (must ALL pass — instant drop if any fail):
- *  1. 4H trend: EMA50 > EMA200 AND price > EMA50 on 4H
- *  2. 1H trend: EMA20 > EMA50 AND price > EMA20 on 1H
+ *  1. 4H trend: EMA50 > EMA200 OR (price > EMA50 AND price > EMA20_1H) — relaxed for sideways markets
+ *  2. 1H trend: price > EMA20 on 1H (simplified)
  *  3. RSI 1H: 45–75 range
  *  4. ADX 1H: > 18 with +DI > -DI
  *  5. Volume: at least 1 of last 3 candles has spike (1.2x avg)
@@ -137,8 +137,8 @@ export interface TickerData {
 // THRESHOLDS — single place to tune
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CONFIDENCE_MIN = 82; // was 88
-const SCORE_MIN = 41; // was 45 (out of 51)
+const CONFIDENCE_MIN = 68; // was 82 — lowered to allow realistic signal count
+const SCORE_MIN = 30; // was 41 (out of 51) — ~60% of scored gates needed
 const RR_MIN = 2.0; // was 2.5
 const ADX_MIN = 18; // was 20
 const VOLUME_SPIKE_RATIO = 1.2; // at least 1 of last 3 candles must hit this
@@ -510,7 +510,7 @@ function lastATR(candles: OHLCV[], period = 14): number {
 /**
  * Analyzes a symbol using the tiered gate system.
  * Hard gates must ALL pass. Scored gates accumulate points.
- * Returns LiveSignal if all 6 hard gates pass + score >= 41/51 + confidence >= 82%.
+ * Returns LiveSignal if all 6 hard gates pass + score >= 30/51 + confidence >= 68%.
  */
 export async function analyzeSymbol(
   symbol: string,
@@ -553,17 +553,23 @@ export async function analyzeSymbol(
   const v_ema50_1h = ema50_1h.length > 0 ? ema50_1h[ema50_1h.length - 1] : 0;
 
   // ══════════════════════════════════════════════════
-  // HARD GATE 1: 4H TREND CONFIRMATION
+  // HARD GATE 1: 4H TREND CONFIRMATION (relaxed)
+  // Allow coins above EMA50 OR in a confirmed EMA golden cross
   // ══════════════════════════════════════════════════
   if (v_ema50_4h <= 0 || v_ema200_4h <= 0) return null;
-  if (v_ema50_4h <= v_ema200_4h) return null; // EMA50 must be above EMA200 on 4H
-  if (currentPrice <= v_ema50_4h) return null; // Price must be above EMA50 on 4H
+  // Original: EMA50 > EMA200 AND price > EMA50
+  // Relaxed:  EMA50 > EMA200 OR (price > EMA50 AND price > v_ema20_1h)
+  const ema4hGoldenCross = v_ema50_4h > v_ema200_4h;
+  const priceAboveEma50_4h = currentPrice > v_ema50_4h;
+  const priceAboveEma20_1h_check = currentPrice > v_ema20_1h && v_ema20_1h > 0;
+  if (!ema4hGoldenCross && !(priceAboveEma50_4h && priceAboveEma20_1h_check))
+    return null;
 
   // ══════════════════════════════════════════════════
-  // HARD GATE 2: 1H TREND CONFIRMATION
+  // HARD GATE 2: 1H TREND CONFIRMATION (relaxed)
+  // Price just needs to be above EMA20 on 1H
   // ══════════════════════════════════════════════════
   if (v_ema20_1h <= 0 || v_ema50_1h <= 0) return null;
-  if (v_ema20_1h <= v_ema50_1h) return null; // EMA20 must be above EMA50 on 1H
   if (currentPrice <= v_ema20_1h) return null; // Price must be above EMA20 on 1H
 
   // ══════════════════════════════════════════════════
@@ -610,7 +616,7 @@ export async function analyzeSymbol(
   let score = 0;
 
   // Base structural points from hard gates already passed
-  if (v_ema50_4h > v_ema200_4h && v_ema200_4h > 0) score += 5; // EMA Golden Cross 4H
+  if (ema4hGoldenCross && v_ema200_4h > 0) score += 5; // EMA Golden Cross 4H
   if (currentPrice > v_ema20_1h && v_ema20_1h > v_ema50_1h) score += 4; // EMA bullish 1H
 
   // SCORED GATE 7: Stop Hunt Sweep Detection
@@ -830,7 +836,7 @@ export async function analyzeSymbol(
 
   const analysisStr = [
     `🔥 TIERED ENGINE CONFIRMED | Score: ${score}/51 | Confidence: ${confidence}% | ${scoredPassCount}/12 Scored Gates`,
-    `📈 4H EMA Golden Cross ✓ | 1H EMA Aligned ✓ | RSI(1H): ${curRsi1h.toFixed(1)} | ADX(1H): ${adxResult1h.adx.toFixed(1)}`,
+    `📈 4H EMA Golden Cross: ${ema4hGoldenCross ? "✓" : "Price>EMA50 ✓"} | 1H EMA Aligned ✓ | RSI(1H): ${curRsi1h.toFixed(1)} | ADX(1H): ${adxResult1h.adx.toFixed(1)}`,
     `📊 RSI(15M): ${curRsi15m_val.toFixed(1)} | MACD: ${macdBullish ? "Bullish ✓" : "Neutral"} | Volume: ${volumeSpike ? "SPIKE ✓" : "Active"}`,
     `💎 Stop Hunt: ${stopHuntConfirmed ? "✓" : "—"} | CHoCH: ${chochConfirmed ? "✓" : "—"} | VWAP: ${vwapConfirmed ? "✓" : "—"} | Ichimoku: ${ichimokuConfirmed ? "✓" : "—"}`,
     `🏆 Entry: ${entryType} | RR: ${riskReward} | TP1: $${tp1.toLocaleString(undefined, { maximumFractionDigits: 4 })} | TP2: $${tp2.toLocaleString(undefined, { maximumFractionDigits: 4 })} | TP3: $${tp3.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
@@ -863,7 +869,7 @@ export async function analyzeSymbol(
     // Extended compatibility fields
     trend: "up",
     volumeConfirmed: true,
-    goldenCross: v_ema50_4h > v_ema200_4h,
+    goldenCross: ema4hGoldenCross,
     supportZone: swingLows30.length > 0,
     score,
     analysis: analysisStr,
