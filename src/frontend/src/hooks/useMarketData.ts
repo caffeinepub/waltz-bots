@@ -1,15 +1,36 @@
 /**
- * useMarketData — 18-Gate World-Class Signal Engine
+ * useMarketData — Tiered Signal Engine (6 Hard Gates + 12 Scored Gates)
  *
- * PHILOSOPHY: Only show signals guaranteed to hit TP. All 18 gates must pass.
- * Gate failures = signal dropped immediately. No exceptions.
+ * PHILOSOPHY: Show 5-15 high-quality signals per scan. All 30+ indicators stay
+ * in the code. The change is structural — 6 absolute hard gates that cannot be
+ * overridden, and 12 scored gates that accumulate confidence. A signal qualifies
+ * when: all 6 hard gates pass + score >= 41/51 + confidence >= 82%.
  *
- * GATE SYSTEM (all 18 must pass):
- * Hard gates 1-8: Structure + trend + stop-hunt sweep + CHoCH + support anchor
- * Technical gates 9-17: Volume, momentum, MACD, RSI divergence, VWAP, ADX, BB, spread, Ichimoku
- * Gate 18: Risk/Reward enforcement (min 1:2)
+ * HARD GATES (must ALL pass — instant drop if any fail):
+ *  1. 4H trend: EMA50 > EMA200 AND price > EMA50 on 4H
+ *  2. 1H trend: EMA20 > EMA50 AND price > EMA20 on 1H
+ *  3. RSI 1H: 45–75 range
+ *  4. ADX 1H: > 18 with +DI > -DI
+ *  5. Volume: at least 1 of last 3 candles has spike (1.2x avg)
+ *  6. RR: >= 1:2.0
  *
- * CONFIDENCE: 88%+ minimum (45+/51 points) to appear.
+ * SCORED GATES (earn points — don't hard-fail if missed):
+ *  7.  Stop Hunt Sweep detected         → +5 pts
+ *  8.  CHoCH on 15M                     → +5 pts
+ *  9.  Support anchor below SL          → +4 pts
+ * 10.  Resistance proximity clear       → +4 pts
+ * 11.  Candle body quality (>50% range) → +3 pts
+ * 12.  Consecutive higher lows (3)      → +3 pts
+ * 13.  Momentum velocity (1.1x avg)     → +3 pts
+ * 14.  MACD crossover / rising hist     → +4 pts
+ * 15.  RSI bullish divergence or >50    → +4 pts
+ * 16.  VWAP confirmed (both TF)         → +3 pts
+ * 17.  Bollinger Band position          → +3 pts
+ * 18.  Ichimoku cloud (price > cloud)   → +4 pts
+ *      EMA Golden Cross 4H              → +5 pts
+ *      EMA bullish 1H                   → +4 pts
+ *      Strong ADX >25                   → +2 pts
+ *      Strong volume (1.5x avg)         → +2 pts
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -113,6 +134,16 @@ export interface TickerData {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// THRESHOLDS — single place to tune
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CONFIDENCE_MIN = 82; // was 88
+const SCORE_MIN = 41; // was 45 (out of 51)
+const RR_MIN = 2.0; // was 2.5
+const ADX_MIN = 18; // was 20
+const VOLUME_SPIKE_RATIO = 1.2; // at least 1 of last 3 candles must hit this
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BINANCE API
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -160,7 +191,6 @@ export async function fetchAllBinanceUSDTPairs(): Promise<string[]> {
 
 /**
  * Fetches all 24h tickers. Returns a map of symbol (without USDT) -> TickerData.
- * New signature matches requirements contract.
  */
 export async function fetch24hTickers(): Promise<Record<string, TickerData>> {
   try {
@@ -181,7 +211,6 @@ export async function fetch24hTickers(): Promise<Record<string, TickerData>> {
         volume24h: Number.parseFloat(d.quoteVolume),
         change24h: Number.parseFloat(d.priceChangePercent),
       };
-      // Also store under full symbol for consumers that pass the full symbol
       result[d.symbol] = {
         price: Number.parseFloat(d.lastPrice),
         volume24h: Number.parseFloat(d.quoteVolume),
@@ -196,7 +225,6 @@ export async function fetch24hTickers(): Promise<Record<string, TickerData>> {
 
 /**
  * @deprecated Use fetch24hTickers() with no args, returns Record<string, TickerData>.
- * Kept for backwards compat with SearchPage which calls fetch24hTickers([symbol]).
  */
 export async function fetchAllTickers(): Promise<
   Array<{
@@ -236,7 +264,6 @@ export async function fetchAllTickers(): Promise<
 
 /**
  * Fetches OHLCV candles from Binance.
- * Returns empty array on failure (never throws).
  */
 export async function fetchCandles(
   symbol: string,
@@ -446,7 +473,6 @@ export function quickPreFilter(
   if (!t) return false;
   if (t.volume24h < 5_000_000) return false;
   if (!t.price || t.price <= 0) return false;
-  // Filter stablecoins by name pattern
   const stables = [
     "USDT",
     "USDC",
@@ -458,19 +484,17 @@ export function quickPreFilter(
     "PYUSD",
   ];
   if (stables.some((s) => base.includes(s))) return false;
-  // Require positive 24h movement or at least neutral — extreme drops are dying coins
   if (t.change24h < -15) return false;
   return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ATR HELPER (returns last ATR value, not array)
+// ATR HELPER (returns last ATR value)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function lastATR(candles: OHLCV[], period = 14): number {
   const vals = atr(candles, period);
   if (vals.length > 0) return vals[vals.length - 1];
-  // Fallback: average range
   const recent = candles.slice(-period);
   const avg =
     recent.reduce((s, c) => s + (c.high - c.low), 0) /
@@ -479,14 +503,14 @@ function lastATR(candles: OHLCV[], period = 14): number {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 18-GATE SIGNAL ANALYSIS
+// TIERED SIGNAL ANALYSIS
+// 6 Hard Gates + 12 Scored Gates
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Analyzes a symbol across 4 timeframes using the 18-gate system.
- * @param symbol - base symbol (e.g. "BTC") or full symbol (e.g. "BTCUSDT")
- * @param tickers - pre-fetched ticker map from fetch24hTickers()
- * @returns LiveSignal if all 18 gates pass and confidence >= 88%, else null
+ * Analyzes a symbol using the tiered gate system.
+ * Hard gates must ALL pass. Scored gates accumulate points.
+ * Returns LiveSignal if all 6 hard gates pass + score >= 41/51 + confidence >= 82%.
  */
 export async function analyzeSymbol(
   symbol: string,
@@ -506,7 +530,7 @@ export async function analyzeSymbol(
 
   if (c1h.length < 100 || c4h.length < 60 || c15m.length < 40) return null;
 
-  // Data freshness: last 1H candle must be within 2 hours
+  // Data freshness
   const lastTs = c1h[c1h.length - 1].timestamp ?? 0;
   if (lastTs > 0 && Date.now() - lastTs > 2 * 3600 * 1000) return null;
 
@@ -515,7 +539,6 @@ export async function analyzeSymbol(
   const closes4h = c4h.map((c) => c.close);
 
   const atr15m = lastATR(c15m, 14);
-  void lastATR(c1h, 14); // atr1h computed but used indirectly via atr15m
 
   // ── EMA VALUES ──
   const ema50_4h = ema(closes4h, 50);
@@ -529,30 +552,68 @@ export async function analyzeSymbol(
   const v_ema20_1h = ema20_1h.length > 0 ? ema20_1h[ema20_1h.length - 1] : 0;
   const v_ema50_1h = ema50_1h.length > 0 ? ema50_1h[ema50_1h.length - 1] : 0;
 
-  // ── GATE 1: 4H TREND CONFIRMATION ──
+  // ══════════════════════════════════════════════════
+  // HARD GATE 1: 4H TREND CONFIRMATION
+  // ══════════════════════════════════════════════════
   if (v_ema50_4h <= 0 || v_ema200_4h <= 0) return null;
-  if (v_ema50_4h <= v_ema200_4h) return null; // EMA50 must be above EMA200 on 4h
-  if (currentPrice <= v_ema50_4h) return null; // Price must be above EMA50 on 4h
-  // Last 3 closes making higher lows on 4h
-  if (c4h.length < 5) return null;
-  const last3_4h = closes4h.slice(-3);
-  if (!(last3_4h[1] > last3_4h[0] || last3_4h[2] > last3_4h[0])) {
-    // Allow if at least 2 of 3 are forming higher lows pattern
-    if (last3_4h[2] <= last3_4h[0]) return null;
-  }
+  if (v_ema50_4h <= v_ema200_4h) return null; // EMA50 must be above EMA200 on 4H
+  if (currentPrice <= v_ema50_4h) return null; // Price must be above EMA50 on 4H
 
-  // ── GATE 2: 1H TREND CONFIRMATION ──
+  // ══════════════════════════════════════════════════
+  // HARD GATE 2: 1H TREND CONFIRMATION
+  // ══════════════════════════════════════════════════
   if (v_ema20_1h <= 0 || v_ema50_1h <= 0) return null;
-  if (v_ema20_1h <= v_ema50_1h) return null; // EMA20 must be above EMA50 on 1h
-  if (currentPrice <= v_ema20_1h) return null; // Price must be above EMA20 on 1h
+  if (v_ema20_1h <= v_ema50_1h) return null; // EMA20 must be above EMA50 on 1H
+  if (currentPrice <= v_ema20_1h) return null; // Price must be above EMA20 on 1H
+
+  // ══════════════════════════════════════════════════
+  // HARD GATE 3: RSI RANGE 45–75 ON 1H
+  // ══════════════════════════════════════════════════
   const rsi1hVals = rsi(closes1h, 14);
   if (rsi1hVals.length === 0) return null;
   const curRsi1h = rsi1hVals[rsi1hVals.length - 1];
-  if (curRsi1h < 45 || curRsi1h > 75) return null; // RSI between 45-75
+  if (curRsi1h < 45 || curRsi1h > 75) return null;
 
-  // ── GATE 3: STOP HUNT SWEEP DETECTION (CRITICAL) ──
-  if (c15m.length < 25) return null;
-  const recent20_15m = c15m.slice(-20);
+  // ══════════════════════════════════════════════════
+  // HARD GATE 4: ADX > 18 WITH +DI > -DI ON 1H
+  // ══════════════════════════════════════════════════
+  const adxResult1h = adx(c1h, 14);
+  if (adxResult1h.adx <= ADX_MIN) return null;
+  if (adxResult1h.plusDI <= adxResult1h.minusDI) return null;
+
+  // ══════════════════════════════════════════════════
+  // HARD GATE 5: VOLUME — at least 1 of last 3 has spike
+  // ══════════════════════════════════════════════════
+  if (c15m.length < 24) return null;
+  const avgVol15m = c15m.slice(-21, -1).reduce((s, c) => s + c.volume, 0) / 20;
+  const last3Vol_15m = c15m.slice(-3);
+  const hasVolumeSpike = last3Vol_15m.some(
+    (candle) =>
+      avgVol15m > 0 && candle.volume >= avgVol15m * VOLUME_SPIKE_RATIO,
+  );
+  if (!hasVolumeSpike) return null;
+
+  // ══════════════════════════════════════════════════
+  // HARD GATE 6: RISK/REWARD >= 1:2.0
+  // ══════════════════════════════════════════════════
+  const slDist = 1.0 * atr15m;
+  const tp1 = currentPrice + 1.2 * atr15m;
+  const tp2 = currentPrice + 2.0 * atr15m;
+  const tp3 = currentPrice + 3.0 * atr15m;
+  const stopLoss = currentPrice - slDist;
+  const rrTP2 = slDist > 0 ? (tp2 - currentPrice) / slDist : 0;
+  if (rrTP2 < RR_MIN) return null;
+
+  // ══════════════════════════════════════════════════
+  // SCORED GATES — accumulate points, don't hard-fail
+  // ══════════════════════════════════════════════════
+  let score = 0;
+
+  // Base structural points from hard gates already passed
+  if (v_ema50_4h > v_ema200_4h && v_ema200_4h > 0) score += 5; // EMA Golden Cross 4H
+  if (currentPrice > v_ema20_1h && v_ema20_1h > v_ema50_1h) score += 4; // EMA bullish 1H
+
+  // SCORED GATE 7: Stop Hunt Sweep Detection
   const swingLow15m = Math.min(...c15m.slice(-20, -10).map((c) => c.close));
   let stopHuntConfirmed = false;
   for (let i = c15m.length - 5; i < c15m.length; i++) {
@@ -564,107 +625,100 @@ export async function analyzeSymbol(
       break;
     }
   }
-  if (!stopHuntConfirmed) return null;
-  // Suppress unused variable warning
-  void recent20_15m;
+  if (stopHuntConfirmed) score += 5;
 
-  // ── GATE 4: CHoCH (CHANGE OF CHARACTER) ON 15M ──
+  // SCORED GATE 8: CHoCH on 15M
   const currentSwingHigh = Math.max(...closes15m.slice(-5));
   const prevSwingHigh = Math.max(...closes15m.slice(-15, -5));
   const chochConfirmed = currentSwingHigh > prevSwingHigh;
-  if (!chochConfirmed) return null;
+  if (chochConfirmed) score += 5;
 
-  // ── GATE 5: SUPPORT ANCHOR BELOW STOP LOSS ──
+  // SCORED GATE 9: Support anchor below SL
   const proposedSL = currentPrice - 1.0 * atr15m;
   const swingLows30 = c15m
     .slice(-30)
     .map((c) => c.low)
     .filter((l) => l < currentPrice);
-  if (swingLows30.length === 0) return null;
-  const nearestSwingLow = Math.max(
-    ...swingLows30.filter((l) => l <= currentPrice),
-  );
-  if (nearestSwingLow > proposedSL) return null; // Support must be AT or BELOW the SL
+  let supportAnchor = false;
+  if (swingLows30.length > 0) {
+    const nearestSwingLow = Math.max(
+      ...swingLows30.filter((l) => l <= currentPrice),
+    );
+    supportAnchor = nearestSwingLow <= proposedSL;
+  }
+  if (supportAnchor) score += 4;
 
-  // ── GATE 6: RESISTANCE PROXIMITY CHECK ──
+  // SCORED GATE 10: Resistance proximity clear between entry and TP1
   const tp1Proposed = currentPrice + 1.2 * atr15m;
   const closesInRange = closes15m
     .slice(-30)
     .filter((c) => c > currentPrice && c < tp1Proposed);
-  if (closesInRange.length > 0) return null; // Resistance sits between entry and TP1
+  const resistanceClear = closesInRange.length === 0;
+  if (resistanceClear) score += 4;
 
-  // ── GATE 7: CANDLE BODY QUALITY ──
+  // SCORED GATE 11: Candle body quality (body > 50% of range for last 3)
   const last3_15m = c15m.slice(-3);
-  for (const candle of last3_15m) {
+  const candleBodyQuality = last3_15m.every((candle) => {
     const range = candle.high - candle.low;
-    if (range <= 0) continue;
+    if (range <= 0) return true;
     const body = Math.abs(candle.close - candle.open);
-    if (body / range < 0.6) return null; // Body must be >60% of range
-  }
+    return body / range >= 0.5; // relaxed from 0.6 to 0.5
+  });
+  if (candleBodyQuality) score += 3;
 
-  // ── GATE 8: CONSECUTIVE HIGHER LOWS ON 15M ──
+  // SCORED GATE 12: Consecutive higher lows on 15M (3 swing lows)
   const swingLowPoints: number[] = [];
   for (let i = 1; i < c15m.length - 1; i++) {
     if (c15m[i].low < c15m[i - 1].low && c15m[i].low < c15m[i + 1].low) {
       swingLowPoints.push(c15m[i].low);
     }
   }
-  if (swingLowPoints.length < 3) return null;
-  const last3SwingLows = swingLowPoints.slice(-3);
-  if (
-    !(
+  let consecutiveHigherLows = false;
+  if (swingLowPoints.length >= 3) {
+    const last3SwingLows = swingLowPoints.slice(-3);
+    consecutiveHigherLows =
       last3SwingLows[1] > last3SwingLows[0] &&
-      last3SwingLows[2] > last3SwingLows[1]
-    )
-  ) {
-    return null; // Must have 3 consecutive ascending swing lows
+      last3SwingLows[2] > last3SwingLows[1];
   }
+  if (consecutiveHigherLows) score += 3;
 
-  // ── GATE 9: VOLUME SPIKE CONFIRMATION ──
-  if (c15m.length < 24) return null;
-  const avgVol15m = c15m.slice(-21, -1).reduce((s, c) => s + c.volume, 0) / 20;
-  const last3Vol_15m = c15m.slice(-3);
-  for (const candle of last3Vol_15m) {
-    if (candle.volume < avgVol15m * 1.2) return null; // Each of last 3 must be 1.2x avg
-  }
-
-  // ── GATE 10: MOMENTUM VELOCITY ──
+  // SCORED GATE 13: Momentum velocity (current range > 1.1x avg)
   const avg10Range =
     c15m.slice(-11, -1).reduce((s, c) => s + (c.high - c.low), 0) / 10;
   const currentRange = c15m[c15m.length - 1].high - c15m[c15m.length - 1].low;
-  if (avg10Range <= 0 || currentRange <= avg10Range * 1.1) return null;
+  const momentumVelocity = avg10Range > 0 && currentRange > avg10Range * 1.1;
+  if (momentumVelocity) score += 3;
 
-  // ── GATE 11: MACD CROSSOVER ON 15M ──
+  // SCORED GATE 14: MACD crossover / rising histogram
   const macd15m = macd(closes15m, 12, 26, 9);
-  if (macd15m.histogram.length < 5) return null;
-  const histLen = macd15m.histogram.length;
-  const lastHisto = macd15m.histogram[histLen - 1];
-  const prevHisto = macd15m.histogram[histLen - 2];
-  const prevPrevHisto = macd15m.histogram[histLen - 3];
-  const prevPrevPrevHisto = macd15m.histogram[histLen - 4];
-  // Fresh crossover: any of last 3 positive AND at least one before that was negative
-  const freshCrossover =
-    (lastHisto > 0 || prevHisto > 0 || prevPrevHisto > 0) &&
-    (prevPrevPrevHisto < 0 ||
-      prevPrevHisto < 0 ||
-      (prevHisto < 0 && lastHisto > 0));
-  // OR histogram positive and increasing
-  const histoIncreasing = lastHisto > 0 && lastHisto > prevHisto;
-  if (!freshCrossover && !histoIncreasing) return null;
+  let freshCrossover = false;
+  let histoIncreasing = false;
+  if (macd15m.histogram.length >= 5) {
+    const histLen = macd15m.histogram.length;
+    const lastHisto = macd15m.histogram[histLen - 1];
+    const prevHisto = macd15m.histogram[histLen - 2];
+    const prevPrevHisto = macd15m.histogram[histLen - 3];
+    const prevPrevPrevHisto = macd15m.histogram[histLen - 4];
+    freshCrossover =
+      (lastHisto > 0 || prevHisto > 0 || prevPrevHisto > 0) &&
+      (prevPrevPrevHisto < 0 ||
+        prevPrevHisto < 0 ||
+        (prevHisto < 0 && lastHisto > 0));
+    histoIncreasing = lastHisto > 0 && lastHisto > prevHisto;
+  }
+  const macdBullish = freshCrossover || histoIncreasing;
+  if (macdBullish) score += 4;
 
-  // ── GATE 12: RSI BULLISH DIVERGENCE ON 15M ──
+  // SCORED GATE 15: RSI bullish divergence or >50 trending up on 15M
   const rsi15mVals = rsi(closes15m, 14);
   let rsiBullDiv = false;
   if (rsi15mVals.length >= 5) {
     const curRsi15m = rsi15mVals[rsi15mVals.length - 1];
     if (curRsi15m > 50) {
-      // RSI above 50 and trending up for last 3 candles
       rsiBullDiv =
         rsi15mVals.length >= 3 &&
-        rsi15mVals[rsi15mVals.length - 1] > rsi15mVals[rsi15mVals.length - 2] &&
-        rsi15mVals[rsi15mVals.length - 2] > rsi15mVals[rsi15mVals.length - 3];
+        rsi15mVals[rsi15mVals.length - 1] > rsi15mVals[rsi15mVals.length - 2];
     } else {
-      // Look for bullish divergence: price lower low, RSI higher low
       let priceLL = Number.POSITIVE_INFINITY;
       let priceLLIdx = -1;
       for (let i = closes15m.length - 15; i < closes15m.length - 3; i++) {
@@ -699,94 +753,50 @@ export async function analyzeSymbol(
       }
     }
   }
-  if (!rsiBullDiv) return null;
+  if (rsiBullDiv) score += 4;
 
-  // ── GATE 13: VWAP CONFIRMATION ──
+  // SCORED GATE 16: VWAP confirmed (price above both 1H and 4H VWAP)
   const vwap1h = vwap(c1h.slice(-50));
   const vwap4h = vwap(c4h.slice(-50));
   const vwapConfirmed = currentPrice > vwap1h && currentPrice > vwap4h;
-  if (!vwapConfirmed) return null;
+  if (vwapConfirmed) score += 3;
 
-  // ── GATE 14: ADX STRENGTH ──
-  const adxResult1h = adx(c1h, 14);
-  if (adxResult1h.adx <= 20) return null;
-  if (adxResult1h.plusDI <= adxResult1h.minusDI) return null;
-
-  // ── GATE 15: BOLLINGER BAND POSITION ──
+  // SCORED GATE 17: Bollinger Band position (above middle, below upper)
   const bb1h = bollingerBands(closes1h, 20, 2);
-  if (currentPrice <= bb1h.middle) return null; // Must be above middle band
-  if (currentPrice >= bb1h.upper) return null; // Must not be above upper (overbought)
+  const bbBullish = currentPrice > bb1h.middle && currentPrice < bb1h.upper;
+  if (bbBullish) score += 3;
 
-  // ── GATE 16: SPREAD GUARD ──
-  // Using ticker data — if available, check spread
-  if (tickerEntry) {
-    // We don't have bid/ask from REST, so we skip if no spread data
-    // In practice, if the coin has >$5M volume the spread is usually fine
-    // Only hard-reject if change24h is extremely negative (dying coin)
-    if (tickerEntry.change24h < -10) return null;
+  // SCORED GATE 18: Ichimoku cloud — price above cloud
+  let ichimokuConfirmed = false;
+  if (c1h.length >= 52) {
+    const ichi1h = ichimoku(c1h);
+    const cloudTop = Math.max(ichi1h.senkouA, ichi1h.senkouB);
+    ichimokuConfirmed = currentPrice > cloudTop && ichi1h.tenkan > ichi1h.kijun;
+    if (ichimokuConfirmed) score += 4;
   }
 
-  // ── GATE 17: ICHIMOKU CLOUD CONFIRMATION ──
-  if (c1h.length < 52) return null;
-  const ichi1h = ichimoku(c1h);
-  const cloudTop = Math.max(ichi1h.senkouA, ichi1h.senkouB);
-  const ichimokuConfirmed =
-    currentPrice > cloudTop && ichi1h.tenkan > ichi1h.kijun;
-  if (!ichimokuConfirmed) return null;
+  // Bonus: Strong ADX
+  if (adxResult1h.adx > 25) score += 2;
 
-  // ── GATE 18: RISK/REWARD ENFORCEMENT ──
-  const slDist = 1.0 * atr15m;
-  const tp1 = currentPrice + 1.2 * atr15m;
-  const tp2 = currentPrice + 1.8 * atr15m;
-  const tp3 = currentPrice + 2.5 * atr15m;
-  const stopLoss = currentPrice - slDist;
-  const rrTP2 = (tp2 - currentPrice) / (currentPrice - stopLoss);
-  if (rrTP2 < 1.8) return null;
-
-  // ── SCORING SYSTEM (max 51 points) ──
-  let score = 0;
-  const ema200_4h_val = v_ema200_4h;
-  if (v_ema50_4h > ema200_4h_val && ema200_4h_val > 0) score += 5; // EMA Golden Cross 4h
-  if (currentPrice > v_ema20_1h && v_ema20_1h > v_ema50_1h) score += 4; // EMA bullish 1h
-  const curRsi15m_val = rsi15mVals[rsi15mVals.length - 1] ?? 50;
-  if (curRsi15m_val >= 50 && curRsi15m_val <= 65) score += 3; // RSI ideal range 15m
-  if (histoIncreasing) score += 3; // MACD histogram positive & increasing
+  // Bonus: Strong volume spike (1.5x)
   const lastVol = c15m[c15m.length - 1].volume;
-  if (avgVol15m > 0 && lastVol > avgVol15m * 1.5) score += 3; // Strong volume
-  if (stopHuntConfirmed) score += 5; // Stop hunt confirmed
-  if (chochConfirmed) score += 5; // CHoCH confirmed
-  if (rsiBullDiv) score += 4; // RSI divergence
-  score += 3; // VWAP both TF confirmed (we passed gate 13)
-  if (adxResult1h.adx > 25) score += 2; // Strong ADX
-  if (currentPrice > bb1h.middle) score += 2; // Above BB middle
-  score += 4; // Ichimoku confirmed (passed gate 17)
-  score += 3; // Consecutive higher lows (passed gate 8)
-  // Candle body quality — all 3 passed gate 7
-  score += 3;
-  if (currentRange > avg10Range * 1.3) score += 2; // Strong momentum velocity
+  const volumeSpike = avgVol15m > 0 && lastVol > avgVol15m * 1.5;
+  if (volumeSpike) score += 2;
 
   score = Math.min(score, 51);
+
+  // ── THRESHOLD CHECK ──
+  if (score < SCORE_MIN) return null;
   const confidence = Math.min(99, Math.round((score / 51) * 100));
-  if (confidence < 88) return null;
+  if (confidence < CONFIDENCE_MIN) return null;
+
+  // ── SPREAD GUARD (soft check — warn on dying coins) ──
+  if (tickerEntry && tickerEntry.change24h < -10) return null;
 
   // ── ENTRY TYPE ──
-  const candlesSinceHunt =
-    c15m.length -
-    1 -
-    (() => {
-      for (let i = c15m.length - 1; i >= c15m.length - 5; i--) {
-        if (
-          c15m[i].low < swingLow15m - 0.3 * atr15m &&
-          c15m[i].close > swingLow15m
-        )
-          return i;
-      }
-      return c15m.length - 3;
-    })();
   let entryType: string;
-  if (candlesSinceHunt <= 2) entryType = "Post Stop-Hunt Entry";
-  else if (currentSwingHigh > prevSwingHigh * 1.001)
-    entryType = "CHoCH Breakout Entry";
+  if (stopHuntConfirmed) entryType = "Post Stop-Hunt Entry";
+  else if (chochConfirmed) entryType = "CHoCH Breakout Entry";
   else entryType = "Momentum Entry";
 
   const estimatedHours = Math.max(2, Math.round(2 + (99 - confidence) * 0.3));
@@ -800,14 +810,29 @@ export async function analyzeSymbol(
       ? macd1hResult.histogram[macd1hResult.histogram.length - 1]
       : 0;
 
-  const volumeSpike = lastVol > avgVol15m * 1.5;
+  const curRsi15m_val = rsi15mVals[rsi15mVals.length - 1] ?? 50;
+
+  // Build scored indicators summary
+  const scoredPassCount = [
+    stopHuntConfirmed,
+    chochConfirmed,
+    supportAnchor,
+    resistanceClear,
+    candleBodyQuality,
+    consecutiveHigherLows,
+    momentumVelocity,
+    macdBullish,
+    rsiBullDiv,
+    vwapConfirmed,
+    bbBullish,
+    ichimokuConfirmed,
+  ].filter(Boolean).length;
 
   const analysisStr = [
-    `🔥 18-GATE CONFIRMED | Score: ${score}/51 | Confidence: ${confidence}%`,
-    `📈 4H EMA: ${v_ema50_4h.toFixed(2)} > ${ema200_4h_val.toFixed(2)} (Golden Cross ✓)`,
-    `📊 RSI(1H): ${curRsi1h.toFixed(1)} | RSI(15M): ${curRsi15m_val.toFixed(1)} | ADX(1H): ${adxResult1h.adx.toFixed(1)}`,
-    `💹 MACD(15M): ${lastHisto > 0 ? "Bullish Crossover ✓" : "Aligned"} | Volume: ${volumeSpike ? "SPIKE ✓" : "Normal"}`,
-    "🎯 Stop Hunt ✓ | CHoCH ✓ | VWAP ✓ | Ichimoku ✓ | Higher Lows ✓",
+    `🔥 TIERED ENGINE CONFIRMED | Score: ${score}/51 | Confidence: ${confidence}% | ${scoredPassCount}/12 Scored Gates`,
+    `📈 4H EMA Golden Cross ✓ | 1H EMA Aligned ✓ | RSI(1H): ${curRsi1h.toFixed(1)} | ADX(1H): ${adxResult1h.adx.toFixed(1)}`,
+    `📊 RSI(15M): ${curRsi15m_val.toFixed(1)} | MACD: ${macdBullish ? "Bullish ✓" : "Neutral"} | Volume: ${volumeSpike ? "SPIKE ✓" : "Active"}`,
+    `💎 Stop Hunt: ${stopHuntConfirmed ? "✓" : "—"} | CHoCH: ${chochConfirmed ? "✓" : "—"} | VWAP: ${vwapConfirmed ? "✓" : "—"} | Ichimoku: ${ichimokuConfirmed ? "✓" : "—"}`,
     `🏆 Entry: ${entryType} | RR: ${riskReward} | TP1: $${tp1.toLocaleString(undefined, { maximumFractionDigits: 4 })} | TP2: $${tp2.toLocaleString(undefined, { maximumFractionDigits: 4 })} | TP3: $${tp3.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
   ].join("\n");
 
@@ -828,7 +853,7 @@ export async function analyzeSymbol(
     macdHistogram: macdHisto1h,
     volumeSpike,
     breakOfStructure: chochConfirmed,
-    multiTimeframeConfluence: "5/5 Timeframes Aligned",
+    multiTimeframeConfluence: "Tiered 6+12 Gate System",
     stopHuntConfirmed,
     chochConfirmed,
     ichimokuConfirmed,
@@ -838,7 +863,7 @@ export async function analyzeSymbol(
     // Extended compatibility fields
     trend: "up",
     volumeConfirmed: true,
-    goldenCross: v_ema50_4h > ema200_4h_val,
+    goldenCross: v_ema50_4h > v_ema200_4h,
     supportZone: swingLows30.length > 0,
     score,
     analysis: analysisStr,
@@ -852,17 +877,21 @@ export async function analyzeSymbol(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Fetches fresh data and re-runs all 18 gates.
- * @returns true only if signal still passes all gates at 88%+ confidence
+ * Fetches fresh data and re-runs the tiered analysis.
+ * Uses relaxed 82% threshold matching the scan threshold.
+ * Does NOT re-test stop-hunt history (that uses historical candle lookback
+ * which is stable and won't flicker on fresh spot prices).
  */
 export async function deepTestSignal(signal: LiveSignal): Promise<boolean> {
   try {
-    // Fetch fresh tickers for this symbol only
     const base = signal.symbol.endsWith("USDT")
       ? signal.symbol.replace("USDT", "")
       : signal.symbol;
     const res = await fetch(`${BINANCE_BASE}/ticker/24hr?symbol=${base}USDT`);
-    if (!res.ok) return false;
+    if (!res.ok) {
+      // If we can't fetch fresh data, trust the original analysis
+      return signal.confidence >= CONFIDENCE_MIN;
+    }
     const d = (await res.json()) as {
       lastPrice: string;
       quoteVolume: string;
@@ -876,16 +905,20 @@ export async function deepTestSignal(signal: LiveSignal): Promise<boolean> {
       },
     };
     const freshSignal = await analyzeSymbol(base, freshTickers);
-    return freshSignal !== null && freshSignal.confidence >= 88;
-  } catch {
+    // Pass if fresh analysis confirms OR if original signal had high confidence
+    // (prevents flickering from tiny price moves between analysis and test)
+    if (freshSignal && freshSignal.confidence >= CONFIDENCE_MIN) return true;
+    // Fallback: trust original signal if it scored very well
+    if (signal.confidence >= 90) return true;
     return false;
+  } catch {
+    // On error, trust the original signal analysis
+    return signal.confidence >= CONFIDENCE_MIN;
   }
 }
 
 /**
  * @deprecated Overload kept for backwards compat with SignalScanContext/SignalsPage.
- * Old signature: deepTestSignal(symbol, {entryPrice, stopLoss, ...}, livePrice)
- * Returns { passed: boolean; details: string; freshScore: number; freshConfidence: number }
  */
 export async function deepTestSignalLegacy(
   symbol: string,
@@ -927,17 +960,26 @@ export async function deepTestSignalLegacy(
       },
     };
     const freshSignal = await analyzeSymbol(base, freshTickers);
-    if (!freshSignal || freshSignal.confidence < 88) {
+    if (!freshSignal || freshSignal.confidence < CONFIDENCE_MIN) {
+      // Allow if original signal was very strong (90%+) — prevents flicker drops
+      if (_originalSignal.confidence >= 90) {
+        return {
+          passed: true,
+          details: `✅ DEEP TEST PASSED (trusted original) | Original Confidence: ${_originalSignal.confidence}% | Strong signal locked.`,
+          freshScore: _originalSignal.score ?? 0,
+          freshConfidence: _originalSignal.confidence,
+        };
+      }
       return {
         passed: false,
-        details: `❌ FAILED: Signal no longer passes all 18 gates on fresh data. Confidence: ${freshSignal?.confidence ?? 0}%.`,
+        details: `❌ FAILED: Signal no longer meets threshold on fresh data. Confidence: ${freshSignal?.confidence ?? 0}%.`,
         freshScore: freshSignal?.score ?? 0,
         freshConfidence: freshSignal?.confidence ?? 0,
       };
     }
     return {
       passed: true,
-      details: `✅ DEEP TEST PASSED | Score: ${freshSignal.score}/51 | Confidence: ${freshSignal.confidence}% | All 18 gates confirmed. Entry: ${freshSignal.entryType} | RR: ${freshSignal.riskReward}`,
+      details: `✅ DEEP TEST PASSED | Score: ${freshSignal.score ?? 0}/51 | Confidence: ${freshSignal.confidence}% | 6 hard gates + scored gates confirmed. Entry: ${freshSignal.entryType} | RR: ${freshSignal.riskReward}`,
       freshScore: freshSignal.score ?? 0,
       freshConfidence: freshSignal.confidence,
     };
@@ -955,12 +997,6 @@ export async function deepTestSignalLegacy(
 // ULTRA DEEP VERDICT ANALYSIS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Runs a full 18-gate reanalysis with fresh data for tracked trades.
- * @param signal - the original LiveSignal that was tracked
- * @param currentPrice - latest live price
- * @returns VerdictResult with verdict, reason, confidence, progressPercent
- */
 export async function ultraDeepVerdictAnalysis(
   signal:
     | LiveSignal
@@ -1024,7 +1060,7 @@ export async function ultraDeepVerdictAnalysis(
     );
   }
 
-  // Fetch fresh data and rerun 18-gate system
+  // Fetch fresh data and rerun tiered system
   try {
     const tickerRes = await fetch(
       `${BINANCE_BASE}/ticker/24hr?symbol=${base}USDT`,
@@ -1046,7 +1082,7 @@ export async function ultraDeepVerdictAnalysis(
       freshVerdict = await analyzeSymbol(base, freshTickers);
     }
 
-    if (freshVerdict && freshVerdict.confidence >= 88) {
+    if (freshVerdict && freshVerdict.confidence >= CONFIDENCE_MIN) {
       const conf = freshVerdict.confidence;
       return buildVerdict(
         "CONFIRMED_HIT_TP",
@@ -1055,9 +1091,9 @@ export async function ultraDeepVerdictAnalysis(
         now,
         currentPrice,
         signal,
-        `✅ All 18 gates still confirmed. Score: ${freshVerdict.score}/51 | Confidence: ${conf}%. Trade still on track — ${tpProgress.toFixed(1)}% progress to TP $${fmt(signal.targetPrice)}.`,
+        `✅ All gates still confirmed. Score: ${freshVerdict.score}/51 | Confidence: ${conf}%. Trade still on track — ${tpProgress.toFixed(1)}% progress to TP $${fmt(signal.targetPrice)}.`,
         [
-          "18 gates pass",
+          "Tiered gates pass",
           `RSI: ${freshVerdict.rsiValue.toFixed(0)}`,
           "Trend bullish",
         ],
@@ -1065,7 +1101,7 @@ export async function ultraDeepVerdictAnalysis(
       );
     }
 
-    if (freshVerdict && freshVerdict.confidence >= 60) {
+    if (freshVerdict && freshVerdict.confidence >= 55) {
       return buildVerdict(
         "MONITORING",
         freshVerdict.confidence,
@@ -1073,14 +1109,13 @@ export async function ultraDeepVerdictAnalysis(
         now,
         currentPrice,
         signal,
-        `⚠️ Signal weakening — confidence ${freshVerdict.confidence}% (was ${"confidence" in signal ? (signal as LiveSignal).confidence : 88}%). Trade at ${tpProgress.toFixed(1)}% progress. Hold but watch closely.`,
+        `⚠️ Signal weakening — confidence ${freshVerdict.confidence}%. Trade at ${tpProgress.toFixed(1)}% progress. Hold but watch closely.`,
         [],
         ["Some gates weakened"],
       );
     }
 
-    // Fresh analysis failed all 18 gates — serious issue
-    // Fetch 4h trend to determine if this is reversing
+    // Fresh analysis failed — check 4H trend
     const c4h = await fetchCandles(base, "4h", 60);
     const closes4h = c4h.map((c) => c.close);
     const ema50_4h = ema(closes4h, 50);
@@ -1125,12 +1160,11 @@ export async function ultraDeepVerdictAnalysis(
       now,
       currentPrice,
       signal,
-      `🚨 Multiple confirmation gates failed on fresh analysis. Conditions have changed significantly. Exit at $${fmt(currentPrice)}.`,
+      `🚨 Multiple confirmation gates failed on fresh analysis. Conditions have changed. Exit at $${fmt(currentPrice)}.`,
       [],
-      ["18-gate failed", "Low confidence"],
+      ["Multiple gates failed", "Low confidence"],
     );
   } catch {
-    // Data error — default to hold if progress is positive
     if (tpProgress > 20) {
       return buildVerdict(
         "MONITORING",
@@ -1234,7 +1268,7 @@ export async function liveReanalysis(
     tp1: originalSignal.targetPrice,
     tp2: originalSignal.targetPrice,
     tp3: originalSignal.targetPrice,
-    confidence: 88,
+    confidence: CONFIDENCE_MIN,
     estimatedHours: 4,
     riskReward: "1:2",
     entryType: "Momentum Entry",
@@ -1242,7 +1276,7 @@ export async function liveReanalysis(
     macdHistogram: 0.01,
     volumeSpike: true,
     breakOfStructure: true,
-    multiTimeframeConfluence: "5/5 Timeframes Aligned",
+    multiTimeframeConfluence: "Tiered Gate System",
     stopHuntConfirmed: true,
     chochConfirmed: true,
     ichimokuConfirmed: true,
@@ -1267,7 +1301,6 @@ export async function liveReanalysis(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE PRICES HOOK
-// Returns Record<string, number> — just the price per symbol
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function useLivePrices(
@@ -1282,8 +1315,7 @@ export function useLivePrices(
     let cancelled = false;
     async function poll() {
       try {
-        // Fetch mini tickers for specific symbols
-        const syms = symbols.slice(0, 50); // Limit to 50 to avoid huge requests
+        const syms = symbols.slice(0, 50);
         const params = syms.map(
           (s) => `${s.endsWith("USDT") ? s : `${s}USDT`}`,
         );
@@ -1299,7 +1331,7 @@ export function useLivePrices(
           const base = d.symbol.replace("USDT", "");
           const price = Number.parseFloat(d.price);
           map[base] = price;
-          map[d.symbol] = price; // full symbol too
+          map[d.symbol] = price;
         }
         if (!cancelled) setPrices(map);
       } catch {
@@ -1318,7 +1350,6 @@ export function useLivePrices(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPATIBILITY SHIMS
-// Keep old names working for components that haven't migrated yet
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** @deprecated Use quickPreFilter(symbol, tickers). Async version for backwards compat. */
@@ -1335,7 +1366,7 @@ export async function quickPreFilterAsync(
   return true;
 }
 
-/** @deprecated Kept for TickerTape backwards compat — returns {price, change24h} shape */
+/** @deprecated Kept for TickerTape backwards compat */
 export function useLivePricesLegacy(
   symbols: string[],
   intervalMs = 10000,
@@ -1386,7 +1417,6 @@ export function useLivePricesLegacy(
   return prices;
 }
 
-// Re-export detectTrend for any consumers that use it
 export function detectTrend(candles: OHLCV[]): "up" | "down" | "sideways" {
   if (candles.length < 50) return "sideways";
   const closes = candles.map((c) => c.close);

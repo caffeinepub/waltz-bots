@@ -5,10 +5,14 @@
  * 1. Fetch all active USDT pairs from Binance exchangeInfo
  * 2. Fetch ALL 24h tickers in ONE call → Record<symbol, TickerData>
  * 3. quickPreFilter() — volume >$5M, not stablecoin, sane change%
- * 4. analyzeSymbol(symbol, tickers) — full 18-gate analysis with 88%+ confidence required
- * 5. deepTestSignal(signal) — final pre-verification; only verified signals shown
- * 6. Signals expire silently after 8 hours; weakening check every 2 minutes
- * 7. Auto-rescan every 5 minutes
+ * 4. analyzeSymbol(symbol, tickers) — tiered analysis (6 hard gates + 12 scored gates, 82%+ confidence)
+ * 5. Signals expire silently after 8 hours; weakening check every 2 minutes
+ * 6. Auto-rescan every 5 minutes
+ *
+ * NOTE: deepTestSignal pre-verification removed from scan pipeline.
+ * It caused valid signals to flicker-drop when market moved 0.1% between
+ * analysis and test. The tiered gate system in analyzeSymbol already ensures
+ * quality — double-testing on fresh data was eliminating good signals.
  */
 
 import {
@@ -23,7 +27,6 @@ import {
   type LiveSignal as MarketDataSignal,
   type TickerData,
   analyzeSymbol,
-  deepTestSignal,
   fetch24hTickers,
   fetchAllBinanceUSDTPairs,
   quickPreFilter,
@@ -258,7 +261,7 @@ export function SignalScanProvider({
         `${candidates.length} candidates pass pre-filter. Analyzing…`,
       );
 
-      // STEP 3: Full 18-gate analysis in batches, stream results as found
+      // STEP 3: Full tiered analysis in batches, stream results as found
       let analyzed = 0;
 
       for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
@@ -270,10 +273,7 @@ export function SignalScanProvider({
               const marketSig = await analyzeSymbol(base, tickers);
               if (!marketSig) return;
 
-              // STEP 4: PRE-VERIFICATION — deepTestSignal re-runs all 18 gates on fresh data
-              const verified = await deepTestSignal(marketSig);
-              if (!verified) return;
-
+              // Signal passed all tiered gates — add directly
               const signal = buildLiveSignal(marketSig, base);
 
               setSignals((prev) => {
